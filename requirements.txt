@@ -1,0 +1,5 @@
+flask==2.3.3
+flask-socketio==5.3.6
+pandas==2.0.3
+apscheduler==3.10.4
+eventlet==0.33.3
