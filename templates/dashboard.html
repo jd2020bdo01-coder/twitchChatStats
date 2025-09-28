@@ -1,774 +1,830 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Analytics Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        :root {
-            --primary-color: #667eea;
-            --secondary-color: #764ba2;
-            --accent-color: #4CAF50;
-            --danger-color: #f44336;
-            --warning-color: #FF9800;
-            --background-dark: #0f0f0f;
-            --surface-dark: #1a1a1a;
-            --surface-light: #2a2a2a;
-            --surface-hover: #3a3a3a;
-            --text-primary: #ffffff;
-            --text-secondary: #cccccc;
-            --text-muted: #888888;
-            --border-color: #444444;
-            --shadow-light: 0 2px 8px rgba(0,0,0,0.15);
-            --shadow-medium: 0 4px 16px rgba(0,0,0,0.25);
-            --shadow-heavy: 0 8px 32px rgba(0,0,0,0.35);
-            --border-radius: 12px;
-            --border-radius-small: 8px;
-            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, var(--background-dark) 0%, #161616 100%);
-            color: var(--text-primary);
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .app-header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            padding: 1.5rem 2rem;
-            box-shadow: var(--shadow-medium);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            backdrop-filter: blur(10px);
-        }
-
-        .app-header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            letter-spacing: -0.025em;
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .app-header h1 i {
-            font-size: 2rem;
-        }
-
-        .status-bar {
-            background: var(--surface-light);
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            backdrop-filter: blur(10px);
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            font-weight: 500;
-        }
-
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: var(--accent-color);
-            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.disconnected {
-            background: var(--danger-color);
-            box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.2);
-        }
-
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-
-        .container {
-            padding: 2rem;
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-
-        .controls-panel {
-            background: var(--surface-light);
-            padding: 2rem;
-            border-radius: var(--border-radius);
-            margin-bottom: 2rem;
-            box-shadow: var(--shadow-light);
-            border: 1px solid var(--border-color);
-        }
-
-        .controls-header {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .controls-header h3 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .controls-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            align-items: end;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .form-group label {
-            font-weight: 500;
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .modern-input, .modern-select, .modern-button {
-            padding: 0.75rem 1rem;
-            border: 2px solid var(--border-color);
-            border-radius: var(--border-radius-small);
-            background: var(--surface-dark);
-            color: var(--text-primary);
-            font-size: 0.925rem;
-            font-weight: 500;
-            transition: var(--transition);
-            outline: none;
-        }
-
-        .modern-input:focus, .modern-select:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .modern-button {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            border: 2px solid transparent;
-            cursor: pointer;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            justify-content: center;
-            min-height: 48px;
-        }
-
-        .modern-button:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-medium);
-        }
-
-        .modern-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .modern-button.secondary {
-            background: transparent;
-            border-color: var(--border-color);
-            color: var(--text-secondary);
-        }
-
-        .modern-button.secondary:hover {
-            background: var(--surface-hover);
-            border-color: var(--primary-color);
-            color: var(--text-primary);
-        }
-
-        .date-picker-container {
-            position: relative;
-        }
-
-        .date-suggestions {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: var(--surface-light);
-            border: 2px solid var(--border-color);
-            border-radius: var(--border-radius-small);
-            box-shadow: var(--shadow-medium);
-            z-index: 50;
-            max-height: 200px;
-            overflow-y: auto;
-            display: none;
-        }
-
-        .date-suggestion {
-            padding: 0.75rem 1rem;
-            cursor: pointer;
-            border-bottom: 1px solid var(--border-color);
-            transition: var(--transition);
-        }
-
-        .date-suggestion:hover {
-            background: var(--surface-hover);
-        }
-
-        .date-suggestion:last-child {
-            border-bottom: none;
-        }
-
-        .channels-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .channel-card {
-            background: var(--surface-light);
-            border-radius: var(--border-radius);
-            padding: 1.5rem;
-            border: 2px solid var(--border-color);
-            cursor: pointer;
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .channel-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-            transform: scaleX(0);
-            transition: var(--transition);
-        }
-
-        .channel-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-medium);
-            border-color: var(--primary-color);
-        }
-
-        .channel-card:hover::before {
-            transform: scaleX(1);
-        }
-
-        .channel-card.selected {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
-        }
-
-        .channel-card.selected::before {
-            transform: scaleX(1);
-        }
-
-        .channel-header {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-
-        .channel-icon {
-            width: 48px;
-            height: 48px;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: white;
-        }
-
-        .channel-name {
-            font-size: 1.375rem;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-
-        .channel-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-        }
-
-        .stat-item {
-            text-align: center;
-            padding: 0.75rem;
-            background: var(--surface-dark);
-            border-radius: var(--border-radius-small);
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary-color);
-            display: block;
-        }
-
-        .stat-label {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .data-section {
-            background: var(--surface-light);
-            border-radius: var(--border-radius);
-            padding: 2rem;
-            box-shadow: var(--shadow-light);
-            border: 1px solid var(--border-color);
-        }
-
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 2rem;
-            gap: 2rem;
-        }
-
-        .section-title h2 {
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            color: var(--text-primary);
-        }
-
-        .summary-cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1rem;
-        }
-
-        .summary-card {
-            background: var(--surface-dark);
-            padding: 1rem;
-            border-radius: var(--border-radius-small);
-            text-align: center;
-            border: 1px solid var(--border-color);
-        }
-
-        .table-controls {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        .search-container {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-
-        .search-container i {
-            position: absolute;
-            left: 1rem;
-            color: var(--text-muted);
-            z-index: 10;
-        }
-
-        .search-container input {
-            padding-left: 2.5rem;
-            min-width: 250px;
-        }
-
-        .table-container {
-            background: var(--surface-dark);
-            border-radius: var(--border-radius-small);
-            overflow: hidden;
-            border: 1px solid var(--border-color);
-        }
-
-        .loading-state {
-            text-align: center;
-            padding: 3rem;
-            color: var(--text-muted);
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--border-color);
-            border-top: 3px solid var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .modern-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .modern-table th,
-        .modern-table td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .modern-table th {
-            background: var(--surface-hover);
-            font-weight: 600;
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: var(--transition);
-            user-select: none;
-        }
-
-        .modern-table th:hover {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .modern-table th i {
-            margin-right: 0.5rem;
-        }
-
-        .modern-table tbody tr {
-            transition: var(--transition);
-        }
-
-        .modern-table tbody tr:hover {
-            background: var(--surface-hover);
-        }
-
-        .alt-badge {
-            display: inline-block;
-            padding: 0.25rem 0.75rem;
-            border-radius: 20px;
-            font-size: 0.875rem;
-            font-weight: 600;
-            text-align: center;
-            min-width: 60px;
-        }
-
-        .alt-badge.low {
-            background: rgba(76, 175, 80, 0.2);
-            color: var(--accent-color);
-            border: 1px solid var(--accent-color);
-        }
-
-        .alt-badge.medium {
-            background: rgba(255, 152, 0, 0.2);
-            color: var(--warning-color);
-            border: 1px solid var(--warning-color);
-        }
-
-        .alt-badge.high {
-            background: rgba(244, 67, 54, 0.2);
-            color: var(--danger-color);
-            border: 1px solid var(--danger-color);
-        }
-
-        .similar-users-list {
-            max-width: 300px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-        }
-
-        .notification {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 1rem 1.5rem;
-            border-radius: var(--border-radius-small);
-            color: white;
-            font-weight: 500;
-            z-index: 1000;
-            transform: translateX(400px);
-            transition: var(--transition);
-        }
-
-        .notification.show {
-            transform: translateX(0);
-        }
-
-        .notification.success {
-            background: var(--accent-color);
-        }
-
-        .notification.error {
-            background: var(--danger-color);
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-            
-            .controls-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .section-header {
-                flex-direction: column;
-                align-items: stretch;
-            }
-            
-            .table-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
-            
-            .search-container input {
-                min-width: 100%;
-            }
-            
-            .channels-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="app-header">
-        <h1><i class="fas fa-chart-line"></i> Chat Analytics Dashboard</h1>
-    </div>
-
-    <div class="status-bar">
-        <div class="status-indicator">
-            <div class="status-dot" id="connectionStatus"></div>
-            <span id="connectionText">Connected</span>
-        </div>
-        <div id="lastUpdate">Last updated: Never</div>
-    </div>
-
-    <div class="container">
-        <div class="controls-panel">
-            <div class="controls-header">
-                <i class="fas fa-filter"></i>
-                <h3>Filters & Controls</h3>
-            </div>
-            <div class="controls-grid">
-                <div class="form-group">
-                    <label for="channelSelect">Select Channel</label>
-                    <select id="channelSelect" class="modern-select" onchange="onChannelChange()">
-                        <option value="">Choose a channel...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="dateFilterInput">Date Filter</label>
-                    <div class="date-picker-container">
-                        <input type="text" id="dateFilterInput" class="modern-input" 
-                               placeholder="Select date or range..." 
-                               onfocus="showDateSuggestions()" 
-                               onblur="hideDateSuggestions()" 
-                               oninput="filterDateSuggestions()">
-                        <div id="dateSuggestions" class="date-suggestions"></div>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>&nbsp;</label>
-                    <button class="modern-button" onclick="applyFilters()">
-                        <i class="fas fa-search"></i> Apply Filters
-                    </button>
-                </div>
-                <div class="form-group">
-                    <label>&nbsp;</label>
-                    <button class="modern-button secondary" onclick="clearFilters()">
-                        <i class="fas fa-times"></i> Clear All
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div id="channelsOverview" class="channels-grid">
-            <!-- Channel cards will be populated here -->
-        </div>
-
-        <div id="dataTableSection" class="data-section" style="display: none;">
-            <div class="section-header">
-                <div class="section-title">
-                    <h2 id="sectionTitle">Channel Analytics</h2>
-                    <div id="channelSummary" class="summary-cards">
-                        <!-- Summary cards will be populated here -->
-                    </div>
-                </div>
-                <div class="table-controls">
-                    <div class="search-container">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="searchInput" class="modern-input" placeholder="Search users..." oninput="filterTable()">
-                    </div>
-                    <select id="sortSelect" class="modern-select" onchange="sortTable()">
-                        <option value="chat_count">Sort by Messages</option>
-                        <option value="username">Sort by Username</option>
-                        <option value="alt_likelihood">Sort by Alt Score</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="table-container">
-                <div id="loadingSpinner" class="loading-state">
-                    <div class="spinner"></div>
-                    <p>Loading analytics data...</p>
-                </div>
-
-                <table id="dataTable" class="modern-table" style="display: none;">
-                    <thead>
-                        <tr>
-                            <th onclick="sortByColumn('username')">
-                                <i class="fas fa-user"></i> Username
-                            </th>
-                            <th onclick="sortByColumn('chat_count')">
-                                <i class="fas fa-comments"></i> Messages
-                            </th>
-                            <th onclick="sortByColumn('alt_likelihood')">
-                                <i class="fas fa-shield-alt"></i> Alt Score
-                            </th>
-                            <th>
-                                <i class="fas fa-users"></i> Similar Users
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody id="tableBody">
-                        <!-- Table rows will be populated here -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // WebSocket connection and global state
-        const socket = io();
-        let allChannelsData = [];
-        let currentChannelData = null;
-        let selectedChannel = null;
-        let currentDateFilter = null;
-        let availableDates = [];
-        let sortDirection = {};
-
-        // DOM elements
-        const statusDot = document.getElementById('connectionStatus');
-        const statusText = document.getElementById('connectionText');
-        const lastUpdateElement = document.getElementById('lastUpdate');
-        const channelSelect = document.getElementById('channelSelect');
-        const dateFilterInput = document.getElementById('dateFilterInput');
-        const dateSuggestions = document.getElementById('dateSuggestions');
-
-        // Socket event handlers
-        socket.on('connect', function() {
-            statusDot.classList.remove('disconnected');
-            statusText.textContent = 'Connected';
-            console.log('Connected to server');
-        });
-
-        socket.on('disconnect', function() {
-            statusDot.classList.add('disconnected');
-            statusText.textContent = 'Disconnected';
-            console.log('Disconnected from server');
-        });
-
-        socket.on('data_update', function(data) {
-            console.log('Data update received:', data);
-            allChannelsData = data.channels;
-            updateChannelsOverview();
-            updateLastUpdateTime();
-            
-            if (selectedChannel) {
-                requestChannelData(selectedChannel, currentDateFilter);
-            }
-        });
-
-        socket.on('channel_data', function(data) {
-            console.log('Channel data received:', data);
-            currentChannelData = data;
-            displayChannelData(data);
-        });
-
-        socket.on('error', function(data) {
-            console.error('Socket error:', data);
-            showNotification('Error: ' + data.message, 'error');
-        });
-
-        // Load channels on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadChannels();
-        });
-
-        async function loadChannels() {
-            try {
-                const response = await fetch('/api/summary');
-                const data = await response.json();
-                allChannelsData = data.channels;
-                updateChannelsOverview();
-                populateChannelSelect();
-            } catch (error) {
-                console.error('Error loading channels:', error);
-                showNotification('Failed to load channels', 'error');
-            }
-        }
-
-        function populateChannelSelect() {
-            channelSelect.innerHTML = '<option value="">Choose a channel...</option>';
-            allChannelsData.forEach(channel => {
-                const option = document.createElement('option');
-                option.value = channel.channel;
-                option.textContent = channel.channel;
-                channelSelect.appendChild(option);
-            });
-        }
-
-        function updateChannelsOverview() {
-            const container = document.getElementById('channelsOverview');
-            container.innerHTML = '';
-
-            allChannelsData.forEach(channel => {
-                const card = createChannelCard(channel);
-                container.appendChild(card);
-            });
-        }
-
-        function createChannelCard(channel) {
-            const card = document.createElement('div');
-            card.className = 'channel-card';
-            if (selectedChannel === channel.channel) {
-                card.classList.add('selected');
-            }
-            
-            const channelInitial = channel.channel.charAt(0).toUpperCase();
-            
-            card.innerHTML = `
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Chat Analytics Dashboard</title>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+		<link
+			href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+			rel="stylesheet"
+		/>
+		<style>
+			:root {
+				--primary-color: #667eea;
+				--secondary-color: #764ba2;
+				--accent-color: #4caf50;
+				--danger-color: #f44336;
+				--warning-color: #ff9800;
+				--background-dark: #0f0f0f;
+				--surface-dark: #1a1a1a;
+				--surface-light: #2a2a2a;
+				--surface-hover: #3a3a3a;
+				--text-primary: #ffffff;
+				--text-secondary: #cccccc;
+				--text-muted: #888888;
+				--border-color: #444444;
+				--shadow-light: 0 2px 8px rgba(0, 0, 0, 0.15);
+				--shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.25);
+				--shadow-heavy: 0 8px 32px rgba(0, 0, 0, 0.35);
+				--border-radius: 12px;
+				--border-radius-small: 8px;
+				--transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
+
+			body {
+				font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+					Roboto, sans-serif;
+				background: linear-gradient(
+					135deg,
+					var(--background-dark) 0%,
+					#161616 100%
+				);
+				color: var(--text-primary);
+				line-height: 1.6;
+				min-height: 100vh;
+			}
+
+			.app-header {
+				background: linear-gradient(
+					135deg,
+					var(--primary-color) 0%,
+					var(--secondary-color) 100%
+				);
+				padding: 1.5rem 2rem;
+				box-shadow: var(--shadow-medium);
+				position: sticky;
+				top: 0;
+				z-index: 100;
+				backdrop-filter: blur(10px);
+			}
+
+			.app-header h1 {
+				font-size: 2.5rem;
+				font-weight: 700;
+				letter-spacing: -0.025em;
+				display: flex;
+				align-items: center;
+				gap: 1rem;
+			}
+
+			.app-header h1 i {
+				font-size: 2rem;
+			}
+
+			.status-bar {
+				background: var(--surface-light);
+				padding: 1rem 2rem;
+				border-bottom: 1px solid var(--border-color);
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				backdrop-filter: blur(10px);
+			}
+
+			.status-indicator {
+				display: flex;
+				align-items: center;
+				gap: 0.75rem;
+				font-weight: 500;
+			}
+
+			.status-dot {
+				width: 12px;
+				height: 12px;
+				border-radius: 50%;
+				background: var(--accent-color);
+				box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+				animation: pulse 2s infinite;
+			}
+
+			.status-dot.disconnected {
+				background: var(--danger-color);
+				box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.2);
+			}
+
+			@keyframes pulse {
+				0%,
+				100% {
+					transform: scale(1);
+				}
+				50% {
+					transform: scale(1.1);
+				}
+			}
+
+			.container {
+				padding: 2rem;
+				max-width: 1600px;
+				margin: 0 auto;
+			}
+
+			.controls-panel {
+				background: var(--surface-light);
+				padding: 2rem;
+				border-radius: var(--border-radius);
+				margin-bottom: 2rem;
+				box-shadow: var(--shadow-light);
+				border: 1px solid var(--border-color);
+			}
+
+			.controls-header {
+				display: flex;
+				align-items: center;
+				gap: 1rem;
+				margin-bottom: 1.5rem;
+			}
+
+			.controls-header h3 {
+				font-size: 1.25rem;
+				font-weight: 600;
+				color: var(--text-primary);
+			}
+
+			.controls-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+				gap: 1.5rem;
+				align-items: end;
+			}
+
+			.form-group {
+				display: flex;
+				flex-direction: column;
+				gap: 0.5rem;
+			}
+
+			.form-group label {
+				font-weight: 500;
+				color: var(--text-secondary);
+				font-size: 0.875rem;
+				text-transform: uppercase;
+				letter-spacing: 0.05em;
+			}
+
+			.modern-input,
+			.modern-select,
+			.modern-button {
+				padding: 0.75rem 1rem;
+				border: 2px solid var(--border-color);
+				border-radius: var(--border-radius-small);
+				background: var(--surface-dark);
+				color: var(--text-primary);
+				font-size: 0.925rem;
+				font-weight: 500;
+				transition: var(--transition);
+				outline: none;
+			}
+
+			.modern-input:focus,
+			.modern-select:focus {
+				border-color: var(--primary-color);
+				box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+			}
+
+			.modern-button {
+				background: linear-gradient(
+					135deg,
+					var(--primary-color) 0%,
+					var(--secondary-color) 100%
+				);
+				border: 2px solid transparent;
+				cursor: pointer;
+				font-weight: 600;
+				text-transform: uppercase;
+				letter-spacing: 0.05em;
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				justify-content: center;
+				min-height: 48px;
+			}
+
+			.modern-button:hover {
+				transform: translateY(-2px);
+				box-shadow: var(--shadow-medium);
+			}
+
+			.modern-button:disabled {
+				opacity: 0.5;
+				cursor: not-allowed;
+				transform: none;
+			}
+
+			.modern-button.secondary {
+				background: transparent;
+				border-color: var(--border-color);
+				color: var(--text-secondary);
+			}
+
+			.modern-button.secondary:hover {
+				background: var(--surface-hover);
+				border-color: var(--primary-color);
+				color: var(--text-primary);
+			}
+
+			.date-picker-container {
+				position: relative;
+			}
+
+			.date-suggestions {
+				position: absolute;
+				top: 100%;
+				left: 0;
+				right: 0;
+				background: var(--surface-light);
+				border: 2px solid var(--border-color);
+				border-radius: var(--border-radius-small);
+				box-shadow: var(--shadow-medium);
+				z-index: 50;
+				max-height: 200px;
+				overflow-y: auto;
+				display: none;
+			}
+
+			.date-suggestion {
+				padding: 0.75rem 1rem;
+				cursor: pointer;
+				border-bottom: 1px solid var(--border-color);
+				transition: var(--transition);
+			}
+
+			.date-suggestion:hover {
+				background: var(--surface-hover);
+			}
+
+			.date-suggestion:last-child {
+				border-bottom: none;
+			}
+
+			.channels-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+				gap: 1.5rem;
+				margin-bottom: 2rem;
+			}
+
+			.channel-card {
+				background: var(--surface-light);
+				border-radius: var(--border-radius);
+				padding: 1.5rem;
+				border: 2px solid var(--border-color);
+				cursor: pointer;
+				transition: var(--transition);
+				position: relative;
+				overflow: hidden;
+			}
+
+			.channel-card::before {
+				content: "";
+				position: absolute;
+				top: 0;
+				left: 0;
+				right: 0;
+				height: 4px;
+				background: linear-gradient(
+					90deg,
+					var(--primary-color),
+					var(--secondary-color)
+				);
+				transform: scaleX(0);
+				transition: var(--transition);
+			}
+
+			.channel-card:hover {
+				transform: translateY(-4px);
+				box-shadow: var(--shadow-medium);
+				border-color: var(--primary-color);
+			}
+
+			.channel-card:hover::before {
+				transform: scaleX(1);
+			}
+
+			.channel-card.selected {
+				border-color: var(--primary-color);
+				box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+			}
+
+			.channel-card.selected::before {
+				transform: scaleX(1);
+			}
+
+			.channel-header {
+				display: flex;
+				align-items: center;
+				gap: 1rem;
+				margin-bottom: 1rem;
+			}
+
+			.channel-icon {
+				width: 48px;
+				height: 48px;
+				background: linear-gradient(
+					135deg,
+					var(--primary-color),
+					var(--secondary-color)
+				);
+				border-radius: 50%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 1.25rem;
+				font-weight: 600;
+				color: white;
+			}
+
+			.channel-name {
+				font-size: 1.375rem;
+				font-weight: 700;
+				color: var(--text-primary);
+			}
+
+			.channel-stats {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 1rem;
+			}
+
+			.stat-item {
+				text-align: center;
+				padding: 0.75rem;
+				background: var(--surface-dark);
+				border-radius: var(--border-radius-small);
+			}
+
+			.stat-value {
+				font-size: 1.5rem;
+				font-weight: 700;
+				color: var(--primary-color);
+				display: block;
+			}
+
+			.stat-label {
+				font-size: 0.875rem;
+				color: var(--text-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.05em;
+			}
+
+			.data-section {
+				background: var(--surface-light);
+				border-radius: var(--border-radius);
+				padding: 2rem;
+				box-shadow: var(--shadow-light);
+				border: 1px solid var(--border-color);
+			}
+
+			.section-header {
+				display: flex;
+				justify-content: space-between;
+				align-items: flex-start;
+				margin-bottom: 2rem;
+				gap: 2rem;
+			}
+
+			.section-title h2 {
+				font-size: 1.75rem;
+				font-weight: 700;
+				margin-bottom: 1rem;
+				color: var(--text-primary);
+			}
+
+			.summary-cards {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+				gap: 1rem;
+			}
+
+			.summary-card {
+				background: var(--surface-dark);
+				padding: 1rem;
+				border-radius: var(--border-radius-small);
+				text-align: center;
+				border: 1px solid var(--border-color);
+			}
+
+			.table-controls {
+				display: flex;
+				gap: 1rem;
+				align-items: center;
+			}
+
+			.search-container {
+				position: relative;
+				display: flex;
+				align-items: center;
+			}
+
+			.search-container i {
+				position: absolute;
+				left: 1rem;
+				color: var(--text-muted);
+				z-index: 10;
+			}
+
+			.search-container input {
+				padding-left: 2.5rem;
+				min-width: 250px;
+			}
+
+			.table-container {
+				background: var(--surface-dark);
+				border-radius: var(--border-radius-small);
+				overflow: hidden;
+				border: 1px solid var(--border-color);
+			}
+
+			.loading-state {
+				text-align: center;
+				padding: 3rem;
+				color: var(--text-muted);
+			}
+
+			.spinner {
+				width: 40px;
+				height: 40px;
+				border: 3px solid var(--border-color);
+				border-top: 3px solid var(--primary-color);
+				border-radius: 50%;
+				animation: spin 1s linear infinite;
+				margin: 0 auto 1rem;
+			}
+
+			@keyframes spin {
+				0% {
+					transform: rotate(0deg);
+				}
+				100% {
+					transform: rotate(360deg);
+				}
+			}
+
+			.modern-table {
+				width: 100%;
+				border-collapse: collapse;
+			}
+
+			.modern-table th,
+			.modern-table td {
+				padding: 1rem;
+				text-align: left;
+				border-bottom: 1px solid var(--border-color);
+			}
+
+			.modern-table th {
+				background: var(--surface-hover);
+				font-weight: 600;
+				color: var(--text-primary);
+				cursor: pointer;
+				transition: var(--transition);
+				user-select: none;
+			}
+
+			.modern-table th:hover {
+				background: var(--primary-color);
+				color: white;
+			}
+
+			.modern-table th i {
+				margin-right: 0.5rem;
+			}
+
+			.modern-table tbody tr {
+				transition: var(--transition);
+			}
+
+			.modern-table tbody tr:hover {
+				background: var(--surface-hover);
+			}
+
+			.alt-badge {
+				display: inline-block;
+				padding: 0.25rem 0.75rem;
+				border-radius: 20px;
+				font-size: 0.875rem;
+				font-weight: 600;
+				text-align: center;
+				min-width: 60px;
+			}
+
+			.alt-badge.low {
+				background: rgba(76, 175, 80, 0.2);
+				color: var(--accent-color);
+				border: 1px solid var(--accent-color);
+			}
+
+			.alt-badge.medium {
+				background: rgba(255, 152, 0, 0.2);
+				color: var(--warning-color);
+				border: 1px solid var(--warning-color);
+			}
+
+			.alt-badge.high {
+				background: rgba(244, 67, 54, 0.2);
+				color: var(--danger-color);
+				border: 1px solid var(--danger-color);
+			}
+
+			.similar-users-list {
+				max-width: 300px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+				color: var(--text-secondary);
+				font-size: 0.875rem;
+			}
+
+			.notification {
+				position: fixed;
+				top: 20px;
+				right: 20px;
+				padding: 1rem 1.5rem;
+				border-radius: var(--border-radius-small);
+				color: white;
+				font-weight: 500;
+				z-index: 1000;
+				transform: translateX(400px);
+				transition: var(--transition);
+			}
+
+			.notification.show {
+				transform: translateX(0);
+			}
+
+			.notification.success {
+				background: var(--accent-color);
+			}
+
+			.notification.error {
+				background: var(--danger-color);
+			}
+
+			@media (max-width: 768px) {
+				.container {
+					padding: 1rem;
+				}
+
+				.controls-grid {
+					grid-template-columns: 1fr;
+				}
+
+				.section-header {
+					flex-direction: column;
+					align-items: stretch;
+				}
+
+				.table-controls {
+					flex-direction: column;
+					align-items: stretch;
+				}
+
+				.search-container input {
+					min-width: 100%;
+				}
+
+				.channels-grid {
+					grid-template-columns: 1fr;
+				}
+			}
+			#dataTableSection .section-title {
+				width: 100%;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="app-header">
+			<h1><i class="fas fa-chart-line"></i> Chat Analytics Dashboard</h1>
+		</div>
+
+		<div class="status-bar">
+			<div class="status-indicator">
+				<div class="status-dot" id="connectionStatus"></div>
+				<span id="connectionText">Connected</span>
+			</div>
+			<div id="lastUpdate">Last updated: Never</div>
+		</div>
+
+		<div class="container">
+			<div class="controls-panel">
+				<div class="controls-header">
+					<i class="fas fa-filter"></i>
+					<h3>Filters & Controls</h3>
+				</div>
+				<div class="controls-grid">
+					<div class="form-group">
+						<label for="channelSelect">Select Channel</label>
+						<select
+							id="channelSelect"
+							class="modern-select"
+							onchange="onChannelChange()"
+						>
+							<option value="">Choose a channel...</option>
+						</select>
+					</div>
+					<div class="form-group">
+						<label for="dateFilterInput">Date Filter</label>
+						<div class="date-picker-container">
+							<input
+								type="text"
+								id="dateFilterInput"
+								class="modern-input"
+								placeholder="Select date or range..."
+								onfocus="showDateSuggestions()"
+								onblur="hideDateSuggestions()"
+								oninput="filterDateSuggestions()"
+							/>
+							<div id="dateSuggestions" class="date-suggestions"></div>
+						</div>
+					</div>
+					<div class="form-group">
+						<label>&nbsp;</label>
+						<button class="modern-button" onclick="applyFilters()">
+							<i class="fas fa-search"></i> Apply Filters
+						</button>
+					</div>
+					<div class="form-group">
+						<label>&nbsp;</label>
+						<button class="modern-button secondary" onclick="clearFilters()">
+							<i class="fas fa-times"></i> Clear All
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div id="channelsOverview" class="channels-grid">
+				<!-- Channel cards will be populated here -->
+			</div>
+
+			<div id="dataTableSection" class="data-section" style="display: none">
+				<div class="section-header">
+					<div class="section-title">
+						<h2 id="sectionTitle">Channel Analytics</h2>
+						<div id="channelSummary" class="summary-cards">
+							<!-- Summary cards will be populated here -->
+						</div>
+					</div>
+					<div class="table-controls">
+						<div class="search-container">
+							<i class="fas fa-search"></i>
+							<input
+								type="text"
+								id="searchInput"
+								class="modern-input"
+								placeholder="Search users..."
+								oninput="filterTable()"
+							/>
+						</div>
+						<select
+							id="sortSelect"
+							class="modern-select"
+							onchange="sortTable()"
+						>
+							<option value="chat_count">Sort by Messages</option>
+							<option value="username">Sort by Username</option>
+							<option value="alt_likelihood">Sort by Alt Score</option>
+						</select>
+					</div>
+				</div>
+
+				<div class="table-container">
+					<div id="loadingSpinner" class="loading-state">
+						<div class="spinner"></div>
+						<p>Loading analytics data...</p>
+					</div>
+
+					<table id="dataTable" class="modern-table" style="display: none">
+						<thead>
+							<tr>
+								<th onclick="sortByColumn('username')">
+									<i class="fas fa-user"></i> Username
+								</th>
+								<th onclick="sortByColumn('chat_count')">
+									<i class="fas fa-comments"></i> Messages
+								</th>
+								<th onclick="sortByColumn('alt_likelihood')">
+									<i class="fas fa-shield-alt"></i> Alt Score
+								</th>
+								<th><i class="fas fa-users"></i> Similar Users</th>
+							</tr>
+						</thead>
+						<tbody id="tableBody">
+							<!-- Table rows will be populated here -->
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			// WebSocket connection and global state
+			const socket = io();
+			let allChannelsData = [];
+			let currentChannelData = null;
+			let selectedChannel = null;
+			let currentDateFilter = null;
+			let availableDates = [];
+			let sortDirection = {};
+
+			// DOM elements
+			const statusDot = document.getElementById("connectionStatus");
+			const statusText = document.getElementById("connectionText");
+			const lastUpdateElement = document.getElementById("lastUpdate");
+			const channelSelect = document.getElementById("channelSelect");
+			const dateFilterInput = document.getElementById("dateFilterInput");
+			const dateSuggestions = document.getElementById("dateSuggestions");
+
+			// Socket event handlers
+			socket.on("connect", function () {
+				statusDot.classList.remove("disconnected");
+				statusText.textContent = "Connected";
+				console.log("Connected to server");
+			});
+
+			socket.on("disconnect", function () {
+				statusDot.classList.add("disconnected");
+				statusText.textContent = "Disconnected";
+				console.log("Disconnected from server");
+			});
+
+			socket.on("data_update", function (data) {
+				console.log("Data update received:", data);
+				allChannelsData = data.channels;
+				updateChannelsOverview();
+				updateLastUpdateTime();
+
+				if (selectedChannel) {
+					requestChannelData(selectedChannel, currentDateFilter);
+				}
+			});
+
+			socket.on("channel_data", function (data) {
+				console.log("Channel data received:", data);
+				currentChannelData = data;
+				displayChannelData(data);
+			});
+
+			socket.on("error", function (data) {
+				console.error("Socket error:", data);
+				showNotification("Error: " + data.message, "error");
+			});
+
+			// Load channels on page load
+			document.addEventListener("DOMContentLoaded", function () {
+				loadChannels();
+			});
+
+			async function loadChannels() {
+				try {
+					const response = await fetch("/api/summary");
+					const data = await response.json();
+					allChannelsData = data.channels;
+					updateChannelsOverview();
+					populateChannelSelect();
+				} catch (error) {
+					console.error("Error loading channels:", error);
+					showNotification("Failed to load channels", "error");
+				}
+			}
+
+			function populateChannelSelect() {
+				channelSelect.innerHTML =
+					'<option value="">Choose a channel...</option>';
+				allChannelsData.forEach((channel) => {
+					const option = document.createElement("option");
+					option.value = channel.channel;
+					option.textContent = channel.channel;
+					channelSelect.appendChild(option);
+				});
+			}
+
+			function updateChannelsOverview() {
+				const container = document.getElementById("channelsOverview");
+				container.innerHTML = "";
+
+				allChannelsData.forEach((channel) => {
+					const card = createChannelCard(channel);
+					container.appendChild(card);
+				});
+			}
+
+			function createChannelCard(channel) {
+				const card = document.createElement("div");
+				card.className = "channel-card";
+				if (selectedChannel === channel.channel) {
+					card.classList.add("selected");
+				}
+
+				const channelInitial = channel.channel.charAt(0).toUpperCase();
+
+				card.innerHTML = `
                 <div class="channel-header">
                     <div class="channel-icon">${channelInitial}</div>
                     <div class="channel-name">${channel.channel}</div>
@@ -792,68 +848,70 @@
                     </div>
                 </div>
             `;
-            
-            card.onclick = () => selectChannel(channel.channel);
-            return card;
-        }
 
-        async function selectChannel(channelName) {
-            selectedChannel = channelName;
-            channelSelect.value = channelName;
-            updateChannelsOverview();
-            
-            // Load available dates for this channel
-            await loadAvailableDates(channelName);
-            
-            // Request channel data
-            requestChannelData(channelName, currentDateFilter);
-        }
+				card.onclick = () => selectChannel(channel.channel);
+				return card;
+			}
 
-        async function loadAvailableDates(channelName) {
-            try {
-                const response = await fetch(`/api/channel/${channelName}/dates`);
-                const data = await response.json();
-                availableDates = data.dates;
-                updateDateSuggestions();
-            } catch (error) {
-                console.error('Error loading dates:', error);
-            }
-        }
+			async function selectChannel(channelName) {
+				selectedChannel = channelName;
+				channelSelect.value = channelName;
+				updateChannelsOverview();
 
-        function onChannelChange() {
-            const channelName = channelSelect.value;
-            if (channelName) {
-                selectChannel(channelName);
-            } else {
-                selectedChannel = null;
-                currentDateFilter = null;
-                dateFilterInput.value = '';
-                document.getElementById('dataTableSection').style.display = 'none';
-                updateChannelsOverview();
-            }
-        }
+				// Load available dates for this channel
+				await loadAvailableDates(channelName);
 
-        function requestChannelData(channelName, dateFilter = null) {
-            document.getElementById('loadingSpinner').style.display = 'block';
-            document.getElementById('dataTable').style.display = 'none';
-            document.getElementById('dataTableSection').style.display = 'block';
-            
-            socket.emit('request_channel_data', {
-                channel: channelName,
-                date_filter: dateFilter
-            });
-        }
+				// Request channel data
+				requestChannelData(channelName, currentDateFilter);
+			}
 
-        function displayChannelData(data) {
-            document.getElementById('loadingSpinner').style.display = 'none';
-            document.getElementById('dataTable').style.display = 'table';
-            
-            // Update section title
-            document.getElementById('sectionTitle').textContent = `${data.channel} Analytics`;
-            
-            // Update summary cards
-            const summaryContainer = document.getElementById('channelSummary');
-            summaryContainer.innerHTML = `
+			async function loadAvailableDates(channelName) {
+				try {
+					const response = await fetch(`/api/channel/${channelName}/dates`);
+					const data = await response.json();
+					availableDates = data.dates;
+					updateDateSuggestions();
+				} catch (error) {
+					console.error("Error loading dates:", error);
+				}
+			}
+
+			function onChannelChange() {
+				const channelName = channelSelect.value;
+				if (channelName) {
+					selectChannel(channelName);
+				} else {
+					selectedChannel = null;
+					currentDateFilter = null;
+					dateFilterInput.value = "";
+					document.getElementById("dataTableSection").style.display = "none";
+					updateChannelsOverview();
+				}
+			}
+
+			function requestChannelData(channelName, dateFilter = null) {
+				document.getElementById("loadingSpinner").style.display = "block";
+				document.getElementById("dataTable").style.display = "none";
+				document.getElementById("dataTableSection").style.display = "block";
+
+				socket.emit("request_channel_data", {
+					channel: channelName,
+					date_filter: dateFilter,
+				});
+			}
+
+			function displayChannelData(data) {
+				document.getElementById("loadingSpinner").style.display = "none";
+				document.getElementById("dataTable").style.display = "table";
+
+				// Update section title
+				document.getElementById(
+					"sectionTitle"
+				).textContent = `${data.channel} Analytics`;
+
+				// Update summary cards
+				const summaryContainer = document.getElementById("channelSummary");
+				summaryContainer.innerHTML = `
                 <div class="summary-card">
                     <div class="stat-value">${data.total_users.toLocaleString()}</div>
                     <div class="stat-label">Total Users</div>
@@ -871,178 +929,185 @@
                     <div class="stat-label">to ${data.end_date}</div>
                 </div>
             `;
-            
-            // Populate table
-            const tbody = document.getElementById('tableBody');
-            tbody.innerHTML = '';
-            
-            data.user_stats.forEach(user => {
-                const row = document.createElement('tr');
-                
-                // Determine alt likelihood class
-                let altClass = 'low';
-                if (user.alt_likelihood > 70) altClass = 'high';
-                else if (user.alt_likelihood > 40) altClass = 'medium';
-                
-                const similarUsers = user.similar_users.join(', ') || 'None';
-                
-                row.innerHTML = `
+
+				// Populate table
+				const tbody = document.getElementById("tableBody");
+				tbody.innerHTML = "";
+
+				data.user_stats.forEach((user) => {
+					const row = document.createElement("tr");
+
+					// Determine alt likelihood class
+					let altClass = "low";
+					if (user.alt_likelihood > 70) altClass = "high";
+					else if (user.alt_likelihood > 40) altClass = "medium";
+
+					const similarUsers = user.similar_users.join(", ") || "None";
+
+					row.innerHTML = `
                     <td><strong>${user.username}</strong></td>
                     <td>${user.chat_count.toLocaleString()}</td>
-                    <td><span class="alt-badge ${altClass}">${user.alt_likelihood.toFixed(1)}%</span></td>
+                    <td><span class="alt-badge ${altClass}">${user.alt_likelihood.toFixed(
+						1
+					)}%</span></td>
                     <td><span class="similar-users-list" title="${similarUsers}">${similarUsers}</span></td>
                 `;
-                
-                tbody.appendChild(row);
-            });
-        }
 
-        function showDateSuggestions() {
-            if (availableDates.length > 0) {
-                updateDateSuggestions();
-                dateSuggestions.style.display = 'block';
-            }
-        }
+					tbody.appendChild(row);
+				});
+			}
 
-        function hideDateSuggestions() {
-            setTimeout(() => {
-                dateSuggestions.style.display = 'none';
-            }, 200);
-        }
+			function showDateSuggestions() {
+				if (availableDates.length > 0) {
+					updateDateSuggestions();
+					dateSuggestions.style.display = "block";
+				}
+			}
 
-        function updateDateSuggestions() {
-            if (!availableDates.length) return;
-            
-            const filter = dateFilterInput.value.toLowerCase();
-            const filteredDates = availableDates.filter(date => 
-                date.toLowerCase().includes(filter)
-            );
-            
-            dateSuggestions.innerHTML = '';
-            
-            // Add individual dates
-            filteredDates.forEach(date => {
-                const suggestion = document.createElement('div');
-                suggestion.className = 'date-suggestion';
-                suggestion.textContent = date;
-                suggestion.onclick = () => selectDate(date);
-                dateSuggestions.appendChild(suggestion);
-            });
-            
-            // Add range suggestions
-            if (filteredDates.length >= 2 && !filter) {
-                const firstDate = filteredDates[0];
-                const lastDate = filteredDates[filteredDates.length - 1];
-                
-                const rangeSuggestion = document.createElement('div');
-                rangeSuggestion.className = 'date-suggestion';
-                rangeSuggestion.innerHTML = `<strong>Full Range:</strong> ${firstDate} to ${lastDate}`;
-                rangeSuggestion.onclick = () => selectDate(`${firstDate}:${lastDate}`);
-                dateSuggestions.appendChild(rangeSuggestion);
-            }
-        }
+			function hideDateSuggestions() {
+				setTimeout(() => {
+					dateSuggestions.style.display = "none";
+				}, 200);
+			}
 
-        function filterDateSuggestions() {
-            updateDateSuggestions();
-        }
+			function updateDateSuggestions() {
+				if (!availableDates.length) return;
 
-        function selectDate(dateValue) {
-            dateFilterInput.value = dateValue;
-            dateSuggestions.style.display = 'none';
-        }
+				const filter = dateFilterInput.value.toLowerCase();
+				const filteredDates = availableDates.filter((date) =>
+					date.toLowerCase().includes(filter)
+				);
 
-        function applyFilters() {
-            const channel = channelSelect.value;
-            const dateFilter = dateFilterInput.value.trim();
-            
-            if (!channel) {
-                showNotification('Please select a channel first', 'error');
-                return;
-            }
-            
-            currentDateFilter = dateFilter || null;
-            requestChannelData(channel, currentDateFilter);
-        }
+				dateSuggestions.innerHTML = "";
 
-        function clearFilters() {
-            dateFilterInput.value = '';
-            currentDateFilter = null;
-            
-            if (selectedChannel) {
-                requestChannelData(selectedChannel, null);
-            }
-        }
+				// Add individual dates
+				filteredDates.forEach((date) => {
+					const suggestion = document.createElement("div");
+					suggestion.className = "date-suggestion";
+					suggestion.textContent = date;
+					suggestion.onclick = () => selectDate(date);
+					dateSuggestions.appendChild(suggestion);
+				});
 
-        function filterTable() {
-            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-            const table = document.getElementById('dataTable');
-            const rows = table.getElementsByTagName('tr');
-            
-            for (let i = 1; i < rows.length; i++) {
-                const username = rows[i].cells[0].textContent.toLowerCase();
-                const visible = username.includes(searchTerm);
-                rows[i].style.display = visible ? '' : 'none';
-            }
-        }
+				// Add range suggestions
+				if (filteredDates.length >= 2 && !filter) {
+					const firstDate = filteredDates[0];
+					const lastDate = filteredDates[filteredDates.length - 1];
 
-        function sortTable() {
-            const sortBy = document.getElementById('sortSelect').value;
-            if (!currentChannelData) return;
-            
-            let sortedData = [...currentChannelData.user_stats];
-            
-            sortedData.sort((a, b) => {
-                if (sortBy === 'username') {
-                    return a.username.localeCompare(b.username);
-                } else {
-                    return b[sortBy] - a[sortBy];
-                }
-            });
-            
-            currentChannelData.user_stats = sortedData;
-            displayChannelData(currentChannelData);
-        }
+					const rangeSuggestion = document.createElement("div");
+					rangeSuggestion.className = "date-suggestion";
+					rangeSuggestion.innerHTML = `<strong>Full Range:</strong> ${firstDate} to ${lastDate}`;
+					rangeSuggestion.onclick = () =>
+						selectDate(`${firstDate}:${lastDate}`);
+					dateSuggestions.appendChild(rangeSuggestion);
+				}
+			}
 
-        function sortByColumn(column) {
-            const isAscending = sortDirection[column] || false;
-            sortDirection[column] = !isAscending;
-            
-            if (!currentChannelData) return;
-            
-            let sortedData = [...currentChannelData.user_stats];
-            
-            sortedData.sort((a, b) => {
-                let aVal = a[column];
-                let bVal = b[column];
-                
-                if (column === 'username') {
-                    return isAscending ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-                } else {
-                    return isAscending ? aVal - bVal : bVal - aVal;
-                }
-            });
-            
-            currentChannelData.user_stats = sortedData;
-            displayChannelData(currentChannelData);
-        }
+			function filterDateSuggestions() {
+				updateDateSuggestions();
+			}
 
-        function updateLastUpdateTime() {
-            const now = new Date();
-            lastUpdateElement.textContent = `Last updated: ${now.toLocaleTimeString()}`;
-        }
+			function selectDate(dateValue) {
+				dateFilterInput.value = dateValue;
+				dateSuggestions.style.display = "none";
+			}
 
-        function showNotification(message, type = 'success') {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            
-            setTimeout(() => notification.classList.add('show'), 100);
-            setTimeout(() => {
-                notification.classList.remove('show');
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
-        }
-    </script>
-</body>
+			function applyFilters() {
+				const channel = channelSelect.value;
+				const dateFilter = dateFilterInput.value.trim();
+
+				if (!channel) {
+					showNotification("Please select a channel first", "error");
+					return;
+				}
+
+				currentDateFilter = dateFilter || null;
+				requestChannelData(channel, currentDateFilter);
+			}
+
+			function clearFilters() {
+				dateFilterInput.value = "";
+				currentDateFilter = null;
+
+				if (selectedChannel) {
+					requestChannelData(selectedChannel, null);
+				}
+			}
+
+			function filterTable() {
+				const searchTerm = document
+					.getElementById("searchInput")
+					.value.toLowerCase();
+				const table = document.getElementById("dataTable");
+				const rows = table.getElementsByTagName("tr");
+
+				for (let i = 1; i < rows.length; i++) {
+					const username = rows[i].cells[0].textContent.toLowerCase();
+					const visible = username.includes(searchTerm);
+					rows[i].style.display = visible ? "" : "none";
+				}
+			}
+
+			function sortTable() {
+				const sortBy = document.getElementById("sortSelect").value;
+				if (!currentChannelData) return;
+
+				let sortedData = [...currentChannelData.user_stats];
+
+				sortedData.sort((a, b) => {
+					if (sortBy === "username") {
+						return a.username.localeCompare(b.username);
+					} else {
+						return b[sortBy] - a[sortBy];
+					}
+				});
+
+				currentChannelData.user_stats = sortedData;
+				displayChannelData(currentChannelData);
+			}
+
+			function sortByColumn(column) {
+				const isAscending = sortDirection[column] || false;
+				sortDirection[column] = !isAscending;
+
+				if (!currentChannelData) return;
+
+				let sortedData = [...currentChannelData.user_stats];
+
+				sortedData.sort((a, b) => {
+					let aVal = a[column];
+					let bVal = b[column];
+
+					if (column === "username") {
+						return isAscending
+							? aVal.localeCompare(bVal)
+							: bVal.localeCompare(aVal);
+					} else {
+						return isAscending ? aVal - bVal : bVal - aVal;
+					}
+				});
+
+				currentChannelData.user_stats = sortedData;
+				displayChannelData(currentChannelData);
+			}
+
+			function updateLastUpdateTime() {
+				const now = new Date();
+				lastUpdateElement.textContent = `Last updated: ${now.toLocaleTimeString()}`;
+			}
+
+			function showNotification(message, type = "success") {
+				const notification = document.createElement("div");
+				notification.className = `notification ${type}`;
+				notification.textContent = message;
+				document.body.appendChild(notification);
+
+				setTimeout(() => notification.classList.add("show"), 100);
+				setTimeout(() => {
+					notification.classList.remove("show");
+					setTimeout(() => notification.remove(), 300);
+				}, 3000);
+			}
+		</script>
+	</body>
 </html>
