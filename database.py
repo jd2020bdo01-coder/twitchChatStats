@@ -251,23 +251,14 @@ class ChatDatabase:
         cursor = conn.cursor()
         
         if date_filter:
-            if ':' in date_filter:
-                start_date, end_date = date_filter.split(':')
-                cursor.execute('''
-                    SELECT username, COUNT(*) as chat_count
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date BETWEEN ? AND ?
-                    GROUP BY username
-                    ORDER BY chat_count DESC
-                ''', (channel, start_date, end_date))
-            else:
-                cursor.execute('''
-                    SELECT username, COUNT(*) as chat_count
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date = ?
-                    GROUP BY username
-                    ORDER BY chat_count DESC
-                ''', (channel, date_filter))
+            query, params = self._build_date_filter_query(channel, date_filter)
+            cursor.execute(f'''
+                SELECT username, COUNT(*) as chat_count
+                FROM chat_messages 
+                WHERE {query}
+                GROUP BY username
+                ORDER BY chat_count DESC
+            ''', params)
         else:
             cursor.execute('''
                 SELECT username, COUNT(*) as chat_count
@@ -281,27 +272,48 @@ class ChatDatabase:
         conn.close()
         return result
     
+    def _build_date_filter_query(self, channel: str, date_filter: str) -> Tuple[str, Tuple]:
+        """Build SQL query and parameters for enhanced date filtering"""
+        if date_filter.startswith('include:'):
+            # Include specific dates: "include:2024-01-01,2024-01-03,2024-01-05"
+            dates = date_filter[8:].split(',')  # Remove 'include:' prefix
+            placeholders = ','.join(['?' for _ in dates])
+            query = f"channel = ? AND log_date IN ({placeholders})"
+            params = (channel,) + tuple(dates)
+            
+        elif date_filter.startswith('exclude:'):
+            # Exclude specific dates: "exclude:2024-01-02,2024-01-04"
+            dates = date_filter[8:].split(',')  # Remove 'exclude:' prefix
+            placeholders = ','.join(['?' for _ in dates])
+            query = f"channel = ? AND log_date NOT IN ({placeholders})"
+            params = (channel,) + tuple(dates)
+            
+        elif ':' in date_filter and not date_filter.startswith(('include:', 'exclude:')):
+            # Date range: "2024-01-01:2024-01-31"
+            start_date, end_date = date_filter.split(':')
+            query = "channel = ? AND log_date BETWEEN ? AND ?"
+            params = (channel, start_date, end_date)
+            
+        else:
+            # Single date: "2024-01-01"
+            query = "channel = ? AND log_date = ?"
+            params = (channel, date_filter)
+            
+        return query, params
+
     def get_user_messages(self, channel: str, date_filter: Optional[str] = None) -> Dict[str, List[str]]:
         """Get all messages for users in a channel with optional date filtering"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         if date_filter:
-            if ':' in date_filter:
-                start_date, end_date = date_filter.split(':')
-                cursor.execute('''
-                    SELECT username, message
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date BETWEEN ? AND ?
-                    ORDER BY username, timestamp
-                ''', (channel, start_date, end_date))
-            else:
-                cursor.execute('''
-                    SELECT username, message
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date = ?
-                    ORDER BY username, timestamp
-                ''', (channel, date_filter))
+            query, params = self._build_date_filter_query(channel, date_filter)
+            cursor.execute(f'''
+                SELECT username, message
+                FROM chat_messages 
+                WHERE {query}
+                ORDER BY username, timestamp
+            ''', params)
         else:
             cursor.execute('''
                 SELECT username, message
@@ -325,21 +337,13 @@ class ChatDatabase:
         cursor = conn.cursor()
         
         if date_filter:
-            if ':' in date_filter:
-                start_date, end_date = date_filter.split(':')
-                cursor.execute('''
-                    SELECT username, timestamp
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date BETWEEN ? AND ?
-                    ORDER BY username, timestamp
-                ''', (channel, start_date, end_date))
-            else:
-                cursor.execute('''
-                    SELECT username, timestamp
-                    FROM chat_messages 
-                    WHERE channel = ? AND log_date = ?
-                    ORDER BY username, timestamp
-                ''', (channel, date_filter))
+            query, params = self._build_date_filter_query(channel, date_filter)
+            cursor.execute(f'''
+                SELECT username, timestamp
+                FROM chat_messages 
+                WHERE {query}
+                ORDER BY username, timestamp
+            ''', params)
         else:
             cursor.execute('''
                 SELECT username, timestamp
@@ -890,3 +894,598 @@ class ChatDatabase:
         
         conn.close()
         return user_similarities
+    
+    def get_user_messages_paginated(self, channel: str, username: str, date_filter: Optional[str] = None, 
+                                   page: int = 1, limit: int = 100) -> List[Dict]:
+        """Get paginated messages for a specific user with timestamps"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        offset = (page - 1) * limit
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            # Add username filter to the query
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        cursor.execute(f'''
+            SELECT message, timestamp, log_date
+            FROM chat_messages 
+            WHERE {query}
+            ORDER BY timestamp DESC
+            LIMIT ? OFFSET ?
+        ''', params + (limit, offset))
+        
+        messages = []
+        for message, timestamp, log_date in cursor.fetchall():
+            messages.append({
+                'message': message,
+                'timestamp': timestamp,
+                'log_date': log_date
+            })
+        
+        conn.close()
+        return messages
+    
+    def get_user_channels(self, username: str) -> List[Dict]:
+        """Get all channels where a user has been active"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT channel, COUNT(*) as message_count, 
+                   MIN(log_date) as first_message, 
+                   MAX(log_date) as last_message,
+                   MAX(timestamp) as last_activity
+            FROM chat_messages 
+            WHERE username = ?
+            GROUP BY channel
+            ORDER BY message_count DESC
+        ''', (username,))
+        
+        channels = []
+        for channel, count, first, last, last_activity in cursor.fetchall():
+            channels.append({
+                'channel': channel,
+                'message_count': count,
+                'first_message_date': first,
+                'last_message_date': last,
+                'last_activity': last_activity
+            })
+        
+        conn.close()
+        return channels
+    
+    def get_user_activity_timeline(self, channel: str, username: str, 
+                                 date_filter: Optional[str] = None) -> List[Dict]:
+        """Get user's daily activity timeline"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            # Add username filter to the query
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        cursor.execute(f'''
+            SELECT log_date, COUNT(*) as message_count,
+                   MIN(timestamp) as first_message_time,
+                   MAX(timestamp) as last_message_time,
+                   COUNT(DISTINCT substr(timestamp, 12, 2)) as active_hours
+            FROM chat_messages 
+            WHERE {query}
+            GROUP BY log_date
+            ORDER BY log_date DESC
+            LIMIT 30
+        ''', params)
+        
+        timeline = []
+        for log_date, count, first_time, last_time, active_hours in cursor.fetchall():
+            timeline.append({
+                'date': log_date,
+                'message_count': count,
+                'first_message_time': first_time,
+                'last_message_time': last_time,
+                'active_hours': active_hours
+            })
+        
+        conn.close()
+        return timeline
+    
+    def get_user_temporal_analysis(self, channel: str, username: str, 
+                                 date_filter: Optional[str] = None) -> Dict:
+        """Get detailed temporal analysis for a user"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        # Get hourly distribution
+        cursor.execute(f'''
+            SELECT substr(timestamp, 12, 2) as hour, COUNT(*) as count
+            FROM chat_messages 
+            WHERE {query}
+            GROUP BY hour
+            ORDER BY hour
+        ''', params)
+        
+        hourly_data = dict(cursor.fetchall())
+        
+        # Get daily averages and patterns
+        cursor.execute(f'''
+            SELECT 
+                log_date,
+                COUNT(*) as daily_count,
+                MIN(timestamp) as first_msg,
+                MAX(timestamp) as last_msg,
+                COUNT(DISTINCT substr(timestamp, 12, 2)) as active_hours
+            FROM chat_messages 
+            WHERE {query}
+            GROUP BY log_date
+            ORDER BY log_date
+        ''', params)
+        
+        daily_data = []
+        for row in cursor.fetchall():
+            log_date, count, first_msg, last_msg, active_hours = row
+            
+            # Calculate session length
+            first_time = datetime.fromisoformat(first_msg)
+            last_time = datetime.fromisoformat(last_msg)
+            session_length = (last_time - first_time).total_seconds() / 3600  # hours
+            
+            daily_data.append({
+                'date': log_date,
+                'message_count': count,
+                'active_hours': active_hours,
+                'session_length': session_length,
+                'messages_per_hour': count / max(active_hours, 1)
+            })
+        
+        # Calculate overall statistics
+        if daily_data:
+            total_messages = sum(d['message_count'] for d in daily_data)
+            active_days = len(daily_data)
+            avg_messages_per_day = total_messages / active_days
+            avg_session_length = sum(d['session_length'] for d in daily_data) / active_days
+            avg_active_hours = sum(d['active_hours'] for d in daily_data) / active_days
+            
+            # Calculate message frequency patterns
+            messages_per_hour = [d['messages_per_hour'] for d in daily_data]
+            avg_messages_per_hour = sum(messages_per_hour) / len(messages_per_hour)
+            
+            # Determine peak activity hour
+            peak_hour = max(hourly_data, key=hourly_data.get) if hourly_data else '12'
+            peak_hour_messages = hourly_data.get(peak_hour, 0)
+            
+            # Calculate consistency (low variance = consistent)
+            if len(messages_per_hour) > 1:
+                import statistics
+                consistency_score = 1 / (1 + statistics.variance(messages_per_hour))
+            else:
+                consistency_score = 1.0
+                
+        else:
+            total_messages = avg_messages_per_day = avg_session_length = 0
+            avg_active_hours = avg_messages_per_hour = 0
+            peak_hour = '12'
+            peak_hour_messages = 0
+            consistency_score = 0
+            active_days = 0
+        
+        conn.close()
+        
+        return {
+            'hourly_distribution': hourly_data,
+            'daily_patterns': daily_data,
+            'total_messages': total_messages,
+            'active_days': active_days,
+            'avg_messages_per_day': round(avg_messages_per_day, 1),
+            'avg_session_length': round(avg_session_length, 2),
+            'avg_active_hours_per_day': round(avg_active_hours, 1),
+            'avg_messages_per_hour': round(avg_messages_per_hour, 1),
+            'peak_activity_hour': int(peak_hour),
+            'peak_hour_messages': peak_hour_messages,
+            'consistency_score': round(consistency_score, 3),
+            'activity_intensity': min(avg_messages_per_hour / 10, 1.0)  # 0-1 scale
+        }
+    
+    def get_user_behavioral_insights(self, channel: str, username: str, 
+                                   date_filter: Optional[str] = None) -> List[Dict]:
+        """Generate behavioral insights for a user"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        insights = []
+        
+        # Get basic message statistics
+        cursor.execute(f'''
+            SELECT 
+                COUNT(*) as total_msgs,
+                AVG(LENGTH(message)) as avg_msg_length,
+                COUNT(DISTINCT log_date) as active_days,
+                MIN(timestamp) as first_msg,
+                MAX(timestamp) as last_msg
+            FROM chat_messages 
+            WHERE {query}
+        ''', params)
+        
+        result = cursor.fetchone()
+        if result and result[0] > 0:
+            total_msgs, avg_msg_length, active_days, first_msg, last_msg = result
+            
+            # Calculate activity span
+            first_date = datetime.fromisoformat(first_msg)
+            last_date = datetime.fromisoformat(last_msg)
+            total_span_days = (last_date - first_date).days + 1
+            activity_ratio = active_days / total_span_days if total_span_days > 0 else 1
+            
+            # Message frequency insight
+            if total_msgs > 1000:
+                insights.append({
+                    'icon': 'fas fa-fire',
+                    'title': 'High Activity User',
+                    'description': f'Sent {total_msgs:,} messages across {active_days} days',
+                    'value': f'{total_msgs/active_days:.1f} msgs/day',
+                    'type': 'positive'
+                })
+            elif total_msgs > 100:
+                insights.append({
+                    'icon': 'fas fa-chart-line',
+                    'title': 'Regular Participant',
+                    'description': f'Consistent activity with {total_msgs} messages',
+                    'value': f'{total_msgs/active_days:.1f} msgs/day',
+                    'type': 'neutral'
+                })
+            else:
+                insights.append({
+                    'icon': 'fas fa-eye',
+                    'title': 'Occasional User',
+                    'description': f'Limited activity with {total_msgs} messages',
+                    'value': f'{total_msgs/active_days:.1f} msgs/day',
+                    'type': 'info'
+                })
+            
+            # Message length insight
+            if avg_msg_length > 100:
+                insights.append({
+                    'icon': 'fas fa-align-left',
+                    'title': 'Detailed Communicator',
+                    'description': 'Tends to write longer, detailed messages',
+                    'value': f'{avg_msg_length:.0f} chars avg',
+                    'type': 'info'
+                })
+            elif avg_msg_length < 20:
+                insights.append({
+                    'icon': 'fas fa-bolt',
+                    'title': 'Quick Responder',
+                    'description': 'Prefers short, concise messages',
+                    'value': f'{avg_msg_length:.0f} chars avg',
+                    'type': 'info'
+                })
+            
+            # Activity consistency insight
+            if activity_ratio > 0.7:
+                insights.append({
+                    'icon': 'fas fa-calendar-check',
+                    'title': 'Highly Consistent',
+                    'description': f'Active on {activity_ratio*100:.0f}% of days in timespan',
+                    'value': f'{active_days}/{total_span_days} days',
+                    'type': 'positive'
+                })
+            elif activity_ratio < 0.3:
+                insights.append({
+                    'icon': 'fas fa-calendar-times',
+                    'title': 'Sporadic Activity',
+                    'description': f'Active on {activity_ratio*100:.0f}% of days in timespan',
+                    'value': f'{active_days}/{total_span_days} days',
+                    'type': 'warning'
+                })
+        
+        # Check for burst patterns (many messages in short time)
+        cursor.execute(f'''
+            SELECT COUNT(*) as burst_count
+            FROM (
+                SELECT log_date, COUNT(*) as daily_count
+                FROM chat_messages 
+                WHERE {query}
+                GROUP BY log_date
+                HAVING daily_count > 50
+            )
+        ''', params)
+        
+        burst_days = cursor.fetchone()[0]
+        if burst_days > 0:
+            insights.append({
+                'icon': 'fas fa-rocket',
+                'title': 'Burst Communicator',
+                'description': f'Had high-activity days with 50+ messages',
+                'value': f'{burst_days} burst days',
+                'type': 'warning'
+            })
+        
+        conn.close()
+        return insights
+    
+    def get_user_temporal_analysis(self, channel: str, username: str, 
+                                 date_filter: Optional[str] = None) -> Dict:
+        """Get detailed temporal analysis for a user"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        # Get hourly distribution
+        cursor.execute(f'''
+            SELECT substr(timestamp, 12, 2) as hour, COUNT(*) as count
+            FROM chat_messages 
+            WHERE {query}
+            GROUP BY hour
+            ORDER BY hour
+        ''', params)
+        
+        hourly_data = dict(cursor.fetchall())
+        
+        # Get daily averages and patterns
+        cursor.execute(f'''
+            SELECT 
+                log_date,
+                COUNT(*) as daily_count,
+                MIN(timestamp) as first_msg,
+                MAX(timestamp) as last_msg,
+                COUNT(DISTINCT substr(timestamp, 12, 2)) as active_hours
+            FROM chat_messages 
+            WHERE {query}
+            GROUP BY log_date
+            ORDER BY log_date
+        ''', params)
+        
+        daily_data = []
+        for row in cursor.fetchall():
+            log_date, count, first_msg, last_msg, active_hours = row
+            
+            # Calculate session length
+            first_time = datetime.fromisoformat(first_msg)
+            last_time = datetime.fromisoformat(last_msg)
+            session_length = (last_time - first_time).total_seconds() / 3600  # hours
+            
+            daily_data.append({
+                'date': log_date,
+                'message_count': count,
+                'active_hours': active_hours,
+                'session_length': session_length,
+                'messages_per_hour': count / max(active_hours, 1)
+            })
+        
+        # Calculate overall statistics
+        if daily_data:
+            total_messages = sum(d['message_count'] for d in daily_data)
+            active_days = len(daily_data)
+            avg_messages_per_day = total_messages / active_days
+            avg_session_length = sum(d['session_length'] for d in daily_data) / active_days
+            avg_active_hours = sum(d['active_hours'] for d in daily_data) / active_days
+            
+            # Calculate message frequency patterns
+            messages_per_hour = [d['messages_per_hour'] for d in daily_data]
+            avg_messages_per_hour = sum(messages_per_hour) / len(messages_per_hour)
+            
+            # Determine peak activity hour
+            peak_hour = max(hourly_data, key=hourly_data.get) if hourly_data else '12'
+            peak_hour_messages = hourly_data.get(peak_hour, 0)
+            
+            # Calculate consistency (low variance = consistent)
+            if len(messages_per_hour) > 1:
+                variance = sum((x - avg_messages_per_hour) ** 2 for x in messages_per_hour) / len(messages_per_hour)
+                consistency_score = 1.0 / (1.0 + variance)  # Higher score = more consistent
+            else:
+                consistency_score = 1.0
+                
+            return {
+                'total_messages': total_messages,
+                'active_days': active_days,
+                'avg_messages_per_day': round(avg_messages_per_day, 2),
+                'avg_session_length_hours': round(avg_session_length, 2),
+                'avg_active_hours_per_day': round(avg_active_hours, 2),
+                'avg_messages_per_hour': round(avg_messages_per_hour, 2),
+                'peak_activity_hour': peak_hour,
+                'peak_hour_messages': peak_hour_messages,
+                'consistency_score': round(consistency_score, 3),
+                'hourly_distribution': hourly_data,
+                'daily_data': daily_data[-7:]  # Last 7 days for charts
+            }
+        else:
+            return {
+                'total_messages': 0,
+                'active_days': 0,
+                'avg_messages_per_day': 0,
+                'avg_session_length_hours': 0,
+                'avg_active_hours_per_day': 0,
+                'avg_messages_per_hour': 0,
+                'peak_activity_hour': '12',
+                'peak_hour_messages': 0,
+                'consistency_score': 0,
+                'hourly_distribution': {},
+                'daily_data': []
+            }
+        
+        conn.close()
+    
+    def get_user_behavioral_insights(self, channel: str, username: str, 
+                                   date_filter: Optional[str] = None) -> Dict:
+        """Get behavioral insights and patterns for a user"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Build query with date filtering
+        if date_filter:
+            query, params = self._build_date_filter_query(channel, date_filter)
+            query = query.replace("channel = ?", "channel = ? AND username = ?")
+            params = (params[0], username) + params[1:]
+        else:
+            query = "channel = ? AND username = ?"
+            params = (channel, username)
+        
+        # Get message patterns
+        cursor.execute(f'''
+            SELECT message, timestamp, log_date
+            FROM chat_messages 
+            WHERE {query}
+            ORDER BY timestamp
+        ''', params)
+        
+        messages_data = cursor.fetchall()
+        
+        if not messages_data:
+            return {
+                'message_frequency': {'per_minute': 0, 'per_hour': 0, 'per_day': 0},
+                'activity_patterns': [],
+                'writing_style': {},
+                'engagement_level': 'Unknown',
+                'activity_consistency': 0,
+                'burst_messaging': False,
+                'peak_activity_times': []
+            }
+        
+        # Analyze message frequency patterns
+        messages = [msg[0] for msg in messages_data]
+        timestamps = [datetime.fromisoformat(ts[1]) for ts in messages_data]
+        
+        # Calculate time-based frequencies
+        if len(timestamps) > 1:
+            total_time_span = (timestamps[-1] - timestamps[0]).total_seconds()
+            total_minutes = max(total_time_span / 60, 1)
+            total_hours = max(total_time_span / 3600, 1)
+            total_days = max(total_time_span / (3600 * 24), 1)
+            
+            messages_per_minute = len(messages) / total_minutes
+            messages_per_hour = len(messages) / total_hours
+            messages_per_day = len(messages) / total_days
+        else:
+            messages_per_minute = messages_per_hour = messages_per_day = 0
+        
+        # Analyze writing style
+        total_chars = sum(len(msg) for msg in messages)
+        avg_message_length = total_chars / len(messages) if messages else 0
+        
+        question_count = sum(1 for msg in messages if '?' in msg)
+        exclamation_count = sum(1 for msg in messages if '!' in msg)
+        caps_messages = sum(1 for msg in messages if msg.isupper() and len(msg) > 3)
+        
+        question_frequency = question_count / len(messages) if messages else 0
+        exclamation_frequency = exclamation_count / len(messages) if messages else 0
+        caps_frequency = caps_messages / len(messages) if messages else 0
+        
+        # Determine engagement level
+        if messages_per_hour > 10:
+            engagement_level = 'Very High'
+        elif messages_per_hour > 5:
+            engagement_level = 'High'
+        elif messages_per_hour > 1:
+            engagement_level = 'Medium'
+        elif messages_per_hour > 0.1:
+            engagement_level = 'Low'
+        else:
+            engagement_level = 'Very Low'
+        
+        # Analyze burst messaging (multiple messages in short time)
+        burst_threshold = 60  # seconds
+        burst_count = 0
+        for i in range(1, len(timestamps)):
+            if (timestamps[i] - timestamps[i-1]).total_seconds() < burst_threshold:
+                burst_count += 1
+        
+        burst_messaging = burst_count > len(timestamps) * 0.3  # More than 30% are bursts
+        
+        # Find peak activity times (group by hour)
+        hourly_activity = {}
+        for ts in timestamps:
+            hour = ts.hour
+            hourly_activity[hour] = hourly_activity.get(hour, 0) + 1
+        
+        peak_hours = sorted(hourly_activity.items(), key=lambda x: x[1], reverse=True)[:3]
+        peak_activity_times = [f"{hour:02d}:00" for hour, count in peak_hours]
+        
+        # Calculate activity consistency
+        daily_counts = {}
+        for ts in timestamps:
+            date_key = ts.date().isoformat()
+            daily_counts[date_key] = daily_counts.get(date_key, 0) + 1
+        
+        if len(daily_counts) > 1:
+            daily_values = list(daily_counts.values())
+            avg_daily = sum(daily_values) / len(daily_values)
+            variance = sum((x - avg_daily) ** 2 for x in daily_values) / len(daily_values)
+            consistency = 1.0 / (1.0 + variance / avg_daily) if avg_daily > 0 else 0
+        else:
+            consistency = 1.0
+        
+        insights = {
+            'message_frequency': {
+                'per_minute': round(messages_per_minute, 3),
+                'per_hour': round(messages_per_hour, 2),
+                'per_day': round(messages_per_day, 2)
+            },
+            'writing_style': {
+                'avg_message_length': round(avg_message_length, 1),
+                'question_frequency': round(question_frequency, 3),
+                'exclamation_frequency': round(exclamation_frequency, 3),
+                'caps_frequency': round(caps_frequency, 3)
+            },
+            'engagement_level': engagement_level,
+            'activity_consistency': round(consistency, 3),
+            'burst_messaging': burst_messaging,
+            'peak_activity_times': peak_activity_times,
+            'activity_patterns': [
+                {
+                    'pattern': 'High Activity Periods',
+                    'description': f"Most active during {', '.join(peak_activity_times)}",
+                    'value': len(peak_hours)
+                },
+                {
+                    'pattern': 'Message Frequency',
+                    'description': f"{messages_per_hour:.1f} messages per hour on average",
+                    'value': round(messages_per_hour, 2)
+                },
+                {
+                    'pattern': 'Engagement Style',
+                    'description': f"{engagement_level} engagement with {'burst' if burst_messaging else 'steady'} messaging",
+                    'value': engagement_level
+                }
+            ]
+        }
+        
+        conn.close()
+        return insights

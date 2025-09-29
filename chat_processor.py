@@ -882,6 +882,78 @@ class ChatProcessor:
         
         return False
     
+    def group_users_by_stylometry(self, user_messages, similarity_threshold=0.6):
+        """
+        Simple stylometry-based user grouping using TF-IDF and cosine similarity.
+        This method provides compatibility with the existing API calls.
+        """
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            # Fallback to comprehensive analysis if sklearn not available
+            print("    sklearn not available, using comprehensive analysis...")
+            if isinstance(user_messages, dict):
+                groups, alt_scores, similar_users = self.analyze_users_comprehensive(
+                    "temp", user_messages, None, similarity_threshold
+                )
+                # Convert alt_scores to percentages to match expected format
+                alt_scores = {k: v * 100 for k, v in alt_scores.items()}
+                return groups, alt_scores, similar_users
+            else:
+                return [], {}, {}
+        
+        users = list(user_messages.keys())
+        if len(users) <= 1:
+            return [[u] for u in users], {u: 0.0 for u in users}, {u: [] for u in users}
+        
+        # Create corpus from user messages
+        corpus = [' '.join(user_messages[u]) for u in users]
+        
+        try:
+            vectorizer = TfidfVectorizer()
+            X = vectorizer.fit_transform(corpus)
+            sim_matrix = cosine_similarity(X)
+        except Exception as e:
+            print(f"    TF-IDF analysis failed: {e}, using comprehensive analysis...")
+            groups, alt_scores, similar_users = self.analyze_users_comprehensive(
+                "temp", user_messages, None, similarity_threshold
+            )
+            # Convert alt_scores to percentages to match expected format
+            alt_scores = {k: v * 100 for k, v in alt_scores.items()}
+            return groups, alt_scores, similar_users
+        
+        n = len(users)
+        groups = []
+        assigned = set()
+        alt_scores = {u: 0.0 for u in users}
+        similar_users = {u: [] for u in users}
+        
+        for i in range(n):
+            if users[i] in assigned:
+                continue
+            group = [users[i]]
+            for j in range(n):
+                if i != j:
+                    sim = sim_matrix[i, j]
+                    if sim >= similarity_threshold:
+                        similar_users[users[i]].append(f"{users[j]} ({round(sim*100,1)}%)")
+                    alt_scores[users[i]] = max(alt_scores[users[i]], sim)
+            
+            # Grouping logic
+            for j in range(i+1, n):
+                if users[j] not in assigned and sim_matrix[i, j] >= similarity_threshold:
+                    group.append(users[j])
+                    assigned.add(users[j])
+            assigned.add(users[i])
+            groups.append(group)
+        
+        # Convert scores to percentage
+        for u in alt_scores:
+            alt_scores[u] = round(alt_scores[u] * 100, 1)
+        
+        return groups, alt_scores, similar_users
+
     def update_user_analytics(self, channel: str, date_filter: Optional[str] = None):
         """Update user analytics (chat counts, alt likelihood, similar users)"""
         print(f"  Running stylometry analysis for {channel}...")

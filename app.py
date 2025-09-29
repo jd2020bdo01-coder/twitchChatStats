@@ -132,6 +132,66 @@ def get_summary():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/user/<username>')
+def get_user_details(username):
+    """Get detailed information about a specific user"""
+    try:
+        channel = request.args.get('channel')
+        date_filter = request.args.get('date_filter')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 100))
+        
+        if not channel:
+            return jsonify({'error': 'Channel parameter required'}), 400
+        
+        # Get user's basic stats
+        user_stats = processor.db.get_user_stats(channel)
+        user_stat = next((stat for stat in user_stats if stat['username'] == username), None)
+        
+        if not user_stat:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Get user's messages with pagination
+        user_messages = processor.db.get_user_messages_paginated(
+            channel, username, date_filter, page, limit
+        )
+        
+        # Get user's channel activity (which channels they're active in)
+        user_channels = processor.db.get_user_channels(username)
+        
+        # Get user's activity timeline
+        activity_timeline = processor.db.get_user_activity_timeline(
+            channel, username, date_filter
+        )
+        
+        # Get detailed temporal analysis
+        temporal_analysis = processor.db.get_user_temporal_analysis(
+            channel, username, date_filter
+        )
+        
+        # Get behavioral insights
+        behavioral_insights = processor.db.get_user_behavioral_insights(
+            channel, username, date_filter
+        )
+        
+        return jsonify({
+            'username': username,
+            'stats': user_stat,
+            'messages': user_messages,
+            'channels': user_channels,
+            'activity_timeline': activity_timeline,
+            'temporal_analysis': temporal_analysis,
+            'behavioral_insights': behavioral_insights,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'has_more': len(user_messages) == limit
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/process')
 def manual_process():
     """Manually trigger processing of all channels"""
