@@ -1228,27 +1228,333 @@
 				);
 				transition: width 0.3s ease;
 			}
+
+			/* Sidebar Layout */
+			.app-layout {
+				display: flex;
+				min-height: 100vh;
+			}
+
+			.sidebar {
+				width: 320px;
+				background: var(--surface-dark);
+				border-right: 1px solid var(--border-color);
+				overflow-y: auto;
+				overflow-x: hidden;
+				position: fixed;
+				height: 100vh;
+				z-index: 1000;
+				transition: transform var(--transition);
+				box-shadow: var(--shadow-medium);
+			}
+
+			.sidebar.collapsed {
+				transform: translateX(-290px);
+			}
+
+			.sidebar-header {
+				padding: 1.5rem;
+				border-bottom: 1px solid var(--border-color);
+				background: var(--surface-light);
+				position: sticky;
+				top: 0;
+				z-index: 10;
+			}
+
+			.sidebar-title {
+				font-size: 1.2rem;
+				font-weight: 600;
+				color: var(--text-primary);
+				display: flex;
+				align-items: center;
+				gap: 0.75rem;
+			}
+
+			.sidebar-content {
+				padding: 1rem;
+			}
+
+			.main-content {
+				flex: 1;
+				margin-left: 320px;
+				transition: margin-left var(--transition);
+				min-height: 100vh;
+			}
+
+			.main-content.expanded {
+				margin-left: 30px;
+			}
+
+			.sidebar-toggle {
+				position: fixed;
+				top: 20px;
+				left: 20px;
+				z-index: 1001;
+				background: var(--primary-color);
+				color: white;
+				border: none;
+				padding: 12px;
+				border-radius: var(--border-radius-small);
+				cursor: pointer;
+				transition: all var(--transition);
+				box-shadow: var(--shadow-light);
+				font-size: 1rem;
+			}
+
+			.sidebar-toggle:hover {
+				background: var(--secondary-color);
+				transform: translateY(-2px);
+				box-shadow: var(--shadow-medium);
+			}
+
+			.sidebar-toggle.collapsed {
+				left: 20px;
+			}
+
+			.sidebar-toggle.expanded {
+				left: 340px;
+			}
+
+			/* Adjust existing controls for sidebar */
+			.controls-panel {
+				background: none;
+				border: none;
+				box-shadow: none;
+				padding: 0;
+				margin: 0;
+			}
+
+			.controls-header {
+				margin-bottom: 1rem;
+				padding: 0;
+				border: none;
+			}
+
+			.controls-grid {
+				gap: 1rem;
+			}
+
+			/* Compact form elements for sidebar */
+			.sidebar .form-group {
+				margin-bottom: 1rem;
+			}
+
+			.sidebar .form-group label {
+				font-size: 0.85rem;
+				font-weight: 500;
+				margin-bottom: 0.4rem;
+				display: block;
+				color: var(--text-secondary);
+			}
+
+			.sidebar .modern-select,
+			.sidebar .modern-input {
+				width: 100%;
+				padding: 0.6rem 0.8rem;
+				font-size: 0.85rem;
+				border-radius: var(--border-radius-small);
+				border: 1px solid var(--border-color);
+				background: var(--surface-light);
+				color: var(--text-primary);
+				transition: var(--transition);
+				box-sizing: border-box;
+			}
+
+			.sidebar .modern-select:focus,
+			.sidebar .modern-input:focus {
+				outline: none;
+				border-color: var(--primary-color);
+				box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+			}
+
+			.sidebar .date-picker-container {
+				position: relative;
+				width: 100%;
+			}
+
+			.sidebar .date-picker-container input {
+				width: 100%;
+				padding-right: 2.5rem;
+			}
+
+			.sidebar .date-picker-container .date-picker-icon {
+				position: absolute;
+				right: 0.8rem;
+				top: 50%;
+				transform: translateY(-50%);
+				color: var(--text-muted);
+				pointer-events: none;
+				font-size: 0.9rem;
+			}
+
+			/* Compact buttons */
+			.sidebar .action-button {
+				width: 100%;
+				padding: 0.6rem 1rem;
+				font-size: 0.85rem;
+				border-radius: var(--border-radius-small);
+				border: none;
+				background: var(--primary-color);
+				color: white;
+				cursor: pointer;
+				transition: var(--transition);
+				margin: 0.5rem 0;
+			}
+
+			.sidebar .action-button:hover {
+				background: var(--secondary-color);
+				transform: translateY(-1px);
+			}
+
+			.sidebar .action-button.secondary {
+				background: var(--surface-light);
+				color: var(--text-primary);
+				border: 1px solid var(--border-color);
+			}
+
+			.sidebar .action-button.secondary:hover {
+				background: var(--surface-hover);
+			}
+
+			/* Compact multi-select styling */
+			.sidebar .date-multi-select {
+				max-height: 120px;
+				overflow-y: auto;
+				border: 1px solid var(--border-color);
+				border-radius: var(--border-radius-small);
+				background: var(--surface-light);
+				padding: 0.5rem;
+			}
+
+			.sidebar .date-multi-select label {
+				display: flex;
+				align-items: center;
+				padding: 0.3rem 0;
+				font-size: 0.8rem;
+				cursor: pointer;
+				margin-bottom: 0;
+			}
+
+			.sidebar .date-multi-select input[type="checkbox"] {
+				margin-right: 0.5rem;
+				transform: scale(0.9);
+			}
+
+			/* Update app header for main content */
+			.app-header {
+				margin: 0;
+				padding: 2rem 2rem 1rem 2rem;
+				border-bottom: 1px solid var(--border-color);
+				background: var(--surface-dark);
+				position: sticky;
+				top: 0;
+				z-index: 100;
+			}
+
+			.status-bar {
+				padding: 1rem 2rem;
+				margin: 0;
+			}
+
+			.container {
+				margin: 0;
+				padding: 2rem;
+				background: none;
+				box-shadow: none;
+			}
+
+			/* Additional compact styling */
+			.sidebar .control-group {
+				margin-bottom: 1.2rem;
+				padding-bottom: 1rem;
+				border-bottom: 1px solid var(--border-color);
+			}
+
+			.sidebar .control-group:last-child {
+				border-bottom: none;
+				margin-bottom: 0;
+			}
+
+			/* Sleeker buttons */
+			.sidebar button {
+				width: 100%;
+				max-width: none;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
+			/* Compact help text */
+			.sidebar .help-text {
+				font-size: 0.75rem;
+				color: var(--text-muted);
+				margin-top: 0.3rem;
+				line-height: 1.3;
+			}
+
+			/* Better spacing for action buttons */
+			.sidebar .button-group {
+				display: flex;
+				gap: 0.5rem;
+				margin: 0.8rem 0;
+			}
+
+			.sidebar .button-group .action-button {
+				flex: 1;
+				margin: 0;
+			}
+
+			/* Responsive design */
+			@media (max-width: 768px) {
+				.sidebar {
+					width: 100%;
+					transform: translateX(-100%);
+				}
+				
+				.sidebar.collapsed {
+					transform: translateX(-100%);
+				}
+				
+				.sidebar.mobile-open {
+					transform: translateX(0);
+				}
+				
+				.main-content {
+					margin-left: 0;
+				}
+				
+				.sidebar-toggle.collapsed,
+				.sidebar-toggle.expanded {
+					left: 20px;
+				}
+
+				.sidebar .controls-grid {
+					gap: 0.8rem;
+				}
+
+				.sidebar .form-group {
+					margin-bottom: 0.8rem;
+				}
+			}
 		</style>
 	</head>
 	<body>
-		<div class="app-header">
-			<h1><i class="fas fa-chart-line"></i> Chat Analytics Dashboard</h1>
-		</div>
+		<div class="app-layout">
+			<!-- Sidebar Toggle Button -->
+			<button class="sidebar-toggle expanded" id="sidebarToggle" onclick="toggleSidebar()">
+				<i class="fas fa-bars"></i>
+			</button>
 
-		<div class="status-bar">
-			<div class="status-indicator">
-				<div class="status-dot" id="connectionStatus"></div>
-				<span id="connectionText">Connected</span>
-			</div>
-			<div id="lastUpdate">Last updated: Never</div>
-		</div>
-
-		<div class="container">
-			<div class="controls-panel">
-				<div class="controls-header">
-					<i class="fas fa-filter"></i>
-					<h3>Filters & Controls</h3>
+			<!-- Sidebar -->
+			<div class="sidebar" id="sidebar">
+				<div class="sidebar-header">
+					<div class="sidebar-title">
+						<i class="fas fa-filter"></i>
+						Filters & Controls
+					</div>
 				</div>
+				<div class="sidebar-content">
+					<div class="controls-panel">
 				<div class="controls-grid">
 					<div class="form-group">
 						<label for="channelSelect">Select Channel</label>
@@ -1354,9 +1660,26 @@
 							<option value="alt_likelihood">Sort by Alt Score</option>
 						</select>
 					</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Main Content -->
+			<div class="main-content" id="mainContent">
+				<div class="app-header">
+					<h1><i class="fas fa-chart-line"></i> Chat Analytics Dashboard</h1>
 				</div>
 
-				<div class="table-container">
+				<div class="status-bar">
+					<div class="status-indicator">
+						<div class="status-dot" id="connectionStatus"></div>
+						<span id="connectionText">Connected</span>
+					</div>
+					<div id="lastUpdate">Last updated: Never</div>
+				</div>
+
+				<div class="container">
+					<div class="table-container">
 					<div id="loadingSpinner" class="loading-state">
 						<div class="spinner"></div>
 						<p>Loading analytics data...</p>
@@ -1381,6 +1704,7 @@
 							<!-- Table rows will be populated here -->
 						</tbody>
 					</table>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -2740,6 +3064,145 @@
 					container.appendChild(item);
 				});
 			}
+
+			// Sidebar toggle functionality
+			function toggleSidebar() {
+				const sidebar = document.getElementById('sidebar');
+				const mainContent = document.getElementById('mainContent');
+				const toggleBtn = document.getElementById('sidebarToggle');
+				
+				sidebar.classList.toggle('collapsed');
+				mainContent.classList.toggle('expanded');
+				
+				if (sidebar.classList.contains('collapsed')) {
+					toggleBtn.classList.remove('expanded');
+					toggleBtn.classList.add('collapsed');
+					toggleBtn.innerHTML = '<i class="fas fa-bars"></i>';
+				} else {
+					toggleBtn.classList.remove('collapsed');
+					toggleBtn.classList.add('expanded');
+					toggleBtn.innerHTML = '<i class="fas fa-times"></i>';
+				}
+			}
+
+			// Handle responsive behavior
+			function handleResize() {
+				const sidebar = document.getElementById('sidebar');
+				const mainContent = document.getElementById('mainContent');
+				const toggleBtn = document.getElementById('sidebarToggle');
+				
+				if (window.innerWidth <= 768) {
+					// Mobile behavior
+					sidebar.classList.add('collapsed');
+					mainContent.classList.add('expanded');
+					toggleBtn.classList.remove('expanded');
+					toggleBtn.classList.add('collapsed');
+				} else {
+					// Desktop behavior - restore sidebar if it was auto-collapsed
+					if (!sidebar.dataset.userCollapsed) {
+						sidebar.classList.remove('collapsed');
+						mainContent.classList.remove('expanded');
+						toggleBtn.classList.remove('collapsed');
+						toggleBtn.classList.add('expanded');
+					}
+				}
+			}
+
+			// Track user manual collapse/expand
+			const originalToggleSidebar = toggleSidebar;
+			toggleSidebar = function() {
+				const sidebar = document.getElementById('sidebar');
+				sidebar.dataset.userCollapsed = sidebar.classList.contains('collapsed') ? 'false' : 'true';
+				originalToggleSidebar();
+			};
+
+			// Add resize listener
+			window.addEventListener('resize', handleResize);
+			
+			// Initialize responsive behavior
+			document.addEventListener('DOMContentLoaded', handleResize);
+
+			// Handle processing status updates
+			socket.on('processing_status', function(data) {
+				console.log('Processing status:', data);
+				
+				const statusBar = document.querySelector('.status-bar');
+				const lastUpdate = document.getElementById('lastUpdate');
+				
+				if (data.status === 'processing') {
+					lastUpdate.innerHTML = `
+						<i class="fas fa-spinner fa-spin" style="color: var(--warning-color);"></i>
+						Processing: ${data.message} (${data.progress || ''})
+					`;
+				} else if (data.status === 'complete') {
+					lastUpdate.innerHTML = `
+						<i class="fas fa-check-circle" style="color: var(--accent-color);"></i>
+						${data.message}
+					`;
+					setTimeout(() => {
+						updateLastUpdateTime();
+					}, 2000);
+				} else if (data.status === 'error') {
+					lastUpdate.innerHTML = `
+						<i class="fas fa-exclamation-triangle" style="color: var(--danger-color);"></i>
+						Error: ${data.message}
+					`;
+				}
+			});
+
+			// Enhanced data update handler
+			socket.on('data_update', function(data) {
+				console.log('Data update received:', data);
+				
+				if (data.channels && data.channels.length > 0) {
+					// Update channels dropdown if needed
+					populateChannels(data.channels);
+					
+					// If current channel is being viewed, refresh its data
+					const currentChannel = document.getElementById('channelSelect').value;
+					if (currentChannel) {
+						// Refresh current view with new data
+						onChannelChange();
+					}
+				}
+			});
+
+			// Show initial loading state for new installations
+			function showInitialLoadingState() {
+				const tableContainer = document.querySelector('.table-container');
+				const loadingSpinner = document.getElementById('loadingSpinner');
+				const dataTable = document.getElementById('dataTable');
+				
+				if (loadingSpinner && dataTable) {
+					loadingSpinner.style.display = 'flex';
+					dataTable.style.display = 'none';
+					
+					const loadingText = loadingSpinner.querySelector('p');
+					if (loadingText) {
+						loadingText.textContent = 'Processing initial data in background...';
+					}
+				}
+			}
+
+			// Check if we need to show initial loading
+			socket.on('connect', function() {
+				// Check if we have any existing data
+				fetch('/api/channels')
+					.then(response => response.json())
+					.then(data => {
+						if (!data.channels || data.channels.length === 0) {
+							showInitialLoadingState();
+							document.getElementById('lastUpdate').innerHTML = `
+								<i class="fas fa-clock" style="color: var(--warning-color);"></i>
+								Processing initial data - this may take a few moments...
+							`;
+						}
+					})
+					.catch(() => {
+						// If we can't fetch channels, assume we're still loading
+						showInitialLoadingState();
+					});
+			});
 
 		</script>
 	</body>

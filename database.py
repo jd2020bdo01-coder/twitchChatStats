@@ -1,20 +1,102 @@
 import sqlite3
 import json
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
+
+class DatabaseConnectionManager:
+    """Thread-safe database connection manager with connection pooling and timeout handling"""
+    
+    def __init__(self, db_path: str, timeout: float = 30.0):
+        self.db_path = db_path
+        self.timeout = timeout
+        self._lock = threading.Lock()
+    
+    @contextmanager
+    def get_connection(self, timeout: Optional[float] = None):
+        """Get a database connection with proper timeout and error handling"""
+        if timeout is None:
+            timeout = self.timeout
+            
+        conn = None
+        try:
+            # Configure SQLite connection with proper settings
+            conn = sqlite3.connect(
+                self.db_path, 
+                timeout=timeout,
+                check_same_thread=False
+            )
+            
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            
+            # Set busy timeout
+            conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+            
+            # Enable foreign keys
+            conn.execute("PRAGMA foreign_keys=ON")
+            
+            yield conn
+            
+        except sqlite3.OperationalError as e:
+            if "database is locked" in str(e).lower():
+                print(f"Database lock detected, retrying in 1 second...")
+                time.sleep(1)
+                # Try one more time with a fresh connection
+                try:
+                    if conn:
+                        conn.close()
+                    conn = sqlite3.connect(
+                        self.db_path, 
+                        timeout=timeout,
+                        check_same_thread=False
+                    )
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+                    conn.execute("PRAGMA foreign_keys=ON")
+                    yield conn
+                except Exception as retry_e:
+                    print(f"Database retry failed: {retry_e}")
+                    raise e
+            else:
+                raise e
+        except Exception as e:
+            print(f"Database connection error: {e}")
+            raise e
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+
+    @contextmanager 
+    def transaction(self, timeout: Optional[float] = None):
+        """Execute operations within a transaction"""
+        with self.get_connection(timeout) as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                yield conn
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise e
 
 class ChatDatabase:
     def __init__(self, db_path="chat_data.db"):
         self.db_path = db_path
+        self.db_manager = DatabaseConnectionManager(db_path, timeout=30.0)
         self.init_database()
     
     def init_database(self):
         """Initialize the database with required tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Table for storing chat messages
-        cursor.execute('''
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Table for storing chat messages
+            cursor.execute('''
             CREATE TABLE IF NOT EXISTS chat_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel TEXT NOT NULL,
@@ -24,10 +106,10 @@ class ChatDatabase:
                 log_date DATE NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
-        
-        # Table for tracking processed files
-        cursor.execute('''
+            ''')
+            
+            # Table for tracking processed files
+            cursor.execute('''
             CREATE TABLE IF NOT EXISTS processed_files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel TEXT NOT NULL,
@@ -40,163 +122,162 @@ class ChatDatabase:
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(channel, filename)
             )
-        ''')
-        
-        # Table for storing user statistics
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_stats (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                username TEXT NOT NULL,
-                chat_count INTEGER DEFAULT 0,
-                alt_likelihood REAL DEFAULT 0.0,
-                similar_users TEXT, -- JSON array of similar users
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, username)
-            )
-        ''')
-        
-        # Table for storing stylometry groups
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS stylometry_groups (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                group_id INTEGER NOT NULL,
-                usernames TEXT NOT NULL, -- JSON array of usernames in group
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, group_id)
-            )
-        ''')
-        
-        # Table for tracking analytics processing status
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS analytics_status (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                last_processed_date DATE,
-                total_messages INTEGER DEFAULT 0,
-                last_analytics_update DATETIME DEFAULT CURRENT_TIMESTAMP,
-                analytics_version INTEGER DEFAULT 1,
-                UNIQUE(channel)
-            )
-        ''')
-        
-        # Optimized word storage: separate words dictionary
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS words_dictionary (
-                word_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                word_text TEXT NOT NULL UNIQUE,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # User-word frequency relationships (normalized)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_word_frequencies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                username TEXT NOT NULL,
-                word_id INTEGER NOT NULL,
-                frequency INTEGER DEFAULT 1,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, username, word_id),
-                FOREIGN KEY (word_id) REFERENCES words_dictionary (word_id)
-            )
-        ''')
-        
-        # Legacy table for backward compatibility (deprecated)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_words (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                username TEXT NOT NULL,
-                word TEXT NOT NULL,
-                frequency INTEGER DEFAULT 1,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, username, word)
-            )
-        ''')
-        
-        # Table for storing user similarity scores
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_similarities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                user1 TEXT NOT NULL,
-                user2 TEXT NOT NULL,
-                word_similarity REAL DEFAULT 0.0,
-                pattern_similarity REAL DEFAULT 0.0,
-                temporal_similarity REAL DEFAULT 0.0,
-                behavioral_similarity REAL DEFAULT 0.0,
-                combined_similarity REAL DEFAULT 0.0,
-                confidence_score REAL DEFAULT 0.0,
-                common_words INTEGER DEFAULT 0,
-                total_compared_words INTEGER DEFAULT 0,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, user1, user2)
-            )
-        ''')
-        
-        # Table for storing detailed user patterns
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                username TEXT NOT NULL,
-                avg_message_length REAL DEFAULT 0.0,
-                message_length_variance REAL DEFAULT 0.0,
-                punctuation_ratio REAL DEFAULT 0.0,
-                exclamation_ratio REAL DEFAULT 0.0,
-                question_ratio REAL DEFAULT 0.0,
-                caps_ratio REAL DEFAULT 0.0,
-                all_caps_frequency REAL DEFAULT 0.0,
-                emoji_frequency REAL DEFAULT 0.0,
-                unique_emoji_count INTEGER DEFAULT 0,
-                repeated_char_frequency REAL DEFAULT 0.0,
-                typo_frequency REAL DEFAULT 0.0,
-                avg_words_per_message REAL DEFAULT 0.0,
-                question_frequency REAL DEFAULT 0.0,
-                exclamation_frequency REAL DEFAULT 0.0,
-                statement_frequency REAL DEFAULT 0.0,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, username)
-            )
-        ''')
-        
-        # Table for storing temporal patterns
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_temporal_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT NOT NULL,
-                username TEXT NOT NULL,
-                peak_hours TEXT, -- JSON array of most active hours
-                avg_session_duration REAL DEFAULT 0.0,
-                avg_message_interval REAL DEFAULT 0.0,
-                burst_frequency REAL DEFAULT 0.0,
-                timezone_consistency REAL DEFAULT 0.0,
-                activity_variance REAL DEFAULT 0.0,
-                total_sessions INTEGER DEFAULT 0,
-                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel, username)
-            )
-        ''')
-        
-        # Create indexes for better performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_channel_date ON chat_messages(channel, log_date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_username ON chat_messages(username)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_stats_channel ON user_stats(channel)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_words_channel_user ON user_words(channel, username)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_words_word ON user_words(word)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_words_dictionary_text ON words_dictionary(word_text)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_word_frequencies_channel_user ON user_word_frequencies(channel, username)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_word_frequencies_word_id ON user_word_frequencies(word_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_similarities_channel ON user_similarities(channel)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_similarities_users ON user_similarities(channel, user1, user2)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_patterns_channel_user ON user_patterns(channel, username)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_temporal_channel_user ON user_temporal_patterns(channel, username)')
-        
-        conn.commit()
-        conn.close()
+            ''')
+            
+            # Table for storing user statistics
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    chat_count INTEGER DEFAULT 0,
+                    alt_likelihood REAL DEFAULT 0.0,
+                    similar_users TEXT, -- JSON array of similar users
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, username)
+                )
+            ''')
+            
+            # Table for storing stylometry groups
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS stylometry_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    group_id INTEGER NOT NULL,
+                    usernames TEXT NOT NULL, -- JSON array of usernames in group
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, group_id)
+                )
+            ''')
+            
+            # Table for tracking analytics processing status
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS analytics_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    last_processed_date DATE,
+                    total_messages INTEGER DEFAULT 0,
+                    last_analytics_update DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    analytics_version INTEGER DEFAULT 1,
+                    UNIQUE(channel)
+                )
+            ''')
+            
+            # Optimized word storage: separate words dictionary
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS words_dictionary (
+                    word_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word_text TEXT NOT NULL UNIQUE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # User-word frequency relationships (normalized)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_word_frequencies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    word_id INTEGER NOT NULL,
+                    frequency INTEGER DEFAULT 1,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, username, word_id),
+                    FOREIGN KEY (word_id) REFERENCES words_dictionary (word_id)
+                )
+            ''')
+            
+            # Legacy table for backward compatibility (deprecated)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    word TEXT NOT NULL,
+                    frequency INTEGER DEFAULT 1,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, username, word)
+                )
+            ''')
+            
+            # Table for storing user similarity scores
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_similarities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    user1 TEXT NOT NULL,
+                    user2 TEXT NOT NULL,
+                    word_similarity REAL DEFAULT 0.0,
+                    pattern_similarity REAL DEFAULT 0.0,
+                    temporal_similarity REAL DEFAULT 0.0,
+                    behavioral_similarity REAL DEFAULT 0.0,
+                    combined_similarity REAL DEFAULT 0.0,
+                    confidence_score REAL DEFAULT 0.0,
+                    common_words INTEGER DEFAULT 0,
+                    total_compared_words INTEGER DEFAULT 0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, user1, user2)
+                )
+            ''')
+            
+            # Table for storing detailed user patterns
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    avg_message_length REAL DEFAULT 0.0,
+                    message_length_variance REAL DEFAULT 0.0,
+                    punctuation_ratio REAL DEFAULT 0.0,
+                    exclamation_ratio REAL DEFAULT 0.0,
+                    question_ratio REAL DEFAULT 0.0,
+                    caps_ratio REAL DEFAULT 0.0,
+                    all_caps_frequency REAL DEFAULT 0.0,
+                    emoji_frequency REAL DEFAULT 0.0,
+                    unique_emoji_count INTEGER DEFAULT 0,
+                    repeated_char_frequency REAL DEFAULT 0.0,
+                    typo_frequency REAL DEFAULT 0.0,
+                    avg_words_per_message REAL DEFAULT 0.0,
+                    question_frequency REAL DEFAULT 0.0,
+                    exclamation_frequency REAL DEFAULT 0.0,
+                    statement_frequency REAL DEFAULT 0.0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, username)
+                )
+            ''')
+            
+            # Table for storing temporal patterns
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_temporal_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    peak_hours TEXT, -- JSON array of most active hours
+                    avg_session_duration REAL DEFAULT 0.0,
+                    avg_message_interval REAL DEFAULT 0.0,
+                    burst_frequency REAL DEFAULT 0.0,
+                    timezone_consistency REAL DEFAULT 0.0,
+                    activity_variance REAL DEFAULT 0.0,
+                    total_sessions INTEGER DEFAULT 0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(channel, username)
+                )
+            ''')
+            
+            # Create indexes for better performance
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_channel_date ON chat_messages(channel, log_date)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_username ON chat_messages(username)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_stats_channel ON user_stats(channel)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_words_channel_user ON user_words(channel, username)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_words_word ON user_words(word)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_words_dictionary_text ON words_dictionary(word_text)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_word_frequencies_channel_user ON user_word_frequencies(channel, username)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_word_frequencies_word_id ON user_word_frequencies(word_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_similarities_channel ON user_similarities(channel)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_similarities_users ON user_similarities(channel, user1, user2)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_patterns_channel_user ON user_patterns(channel, username)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_temporal_channel_user ON user_temporal_patterns(channel, username)')
+            
+            conn.commit()
     
     def get_processed_file_info(self, channel: str, filename: str) -> Optional[Tuple[int, int, str]]:
         """Get processing info for a file: (last_line, file_size, last_modified)"""
@@ -216,34 +297,28 @@ class ChatDatabase:
     def update_processed_file_info(self, channel: str, filename: str, file_path: str, 
                                  last_line: int, file_size: int, last_modified: str):
         """Update or insert file processing information"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO processed_files 
-            (channel, filename, file_path, last_processed_line, file_size, last_modified, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (channel, filename, file_path, last_line, file_size, last_modified))
-        
-        conn.commit()
-        conn.close()
+        with self.db_manager.transaction() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO processed_files 
+                (channel, filename, file_path, last_processed_line, file_size, last_modified, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (channel, filename, file_path, last_line, file_size, last_modified))
     
     def insert_chat_messages(self, messages: List[Dict]):
         """Insert multiple chat messages"""
         if not messages:
             return
             
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.executemany('''
-            INSERT INTO chat_messages (channel, username, message, timestamp, log_date)
-            VALUES (?, ?, ?, ?, ?)
-        ''', [(msg['channel'], msg['username'], msg['message'], 
-               msg['timestamp'], msg['log_date']) for msg in messages])
-        
-        conn.commit()
-        conn.close()
+        with self.db_manager.transaction() as conn:
+            cursor = conn.cursor()
+            
+            cursor.executemany('''
+                INSERT INTO chat_messages (channel, username, message, timestamp, log_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', [(msg['channel'], msg['username'], msg['message'], 
+                   msg['timestamp'], msg['log_date']) for msg in messages])
     
     def get_user_chat_counts(self, channel: str, date_filter: Optional[str] = None) -> Dict[str, int]:
         """Get chat counts for users in a channel with optional date filtering"""
@@ -364,17 +439,14 @@ class ChatDatabase:
     def update_user_stats(self, channel: str, username: str, chat_count: int, 
                          alt_likelihood: float, similar_users: List[str]):
         """Update user statistics"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO user_stats 
-            (channel, username, chat_count, alt_likelihood, similar_users, last_updated)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (channel, username, chat_count, alt_likelihood, json.dumps(similar_users)))
-        
-        conn.commit()
-        conn.close()
+        with self.db_manager.transaction() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_stats 
+                (channel, username, chat_count, alt_likelihood, similar_users, last_updated)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (channel, username, chat_count, alt_likelihood, json.dumps(similar_users)))
     
     def get_user_stats(self, channel: str) -> List[Dict]:
         """Get all user statistics for a channel"""

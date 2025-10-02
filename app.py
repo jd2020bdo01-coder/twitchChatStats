@@ -4,6 +4,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import atexit
 import threading
+import socket
+import os
+import signal
+import sys
 from datetime import datetime
 from chat_processor import ChatProcessor
 
@@ -285,28 +289,19 @@ def handle_channel_request(data):
     except Exception as e:
         emit('error', {'message': str(e)})
 
-if __name__ == '__main__':
-    # Initialize database and process existing data
-    print("Initializing application...")
+def run_initial_processing():
+    """Run initial processing in background thread"""
     try:
-        # Check if we have any existing data to speed up startup
-        existing_channels = processor.db.get_channels()
-        has_existing_data = len(existing_channels) > 0
-        
-        if has_existing_data:
-            print(f"Found existing data for {len(existing_channels)} channels")
-            print("Checking for new messages...")
-        else:
-            print("No existing data found, performing initial processing...")
+        print("🔄 Running initial processing in background...")
         
         # Process chat logs (this will only process new/changed files)
         results = processor.process_all_channels()
         total_new_messages = sum(messages for messages, files in results.values())
         
         if total_new_messages > 0:
-            print(f"Processed {total_new_messages} new messages from logs")
+            print(f"📊 Processed {total_new_messages} new messages from logs")
         else:
-            print("No new messages to process")
+            print("✅ No new messages to process")
         
         # Only update analytics for channels that need it
         channels = processor.db.get_channels()
@@ -315,21 +310,107 @@ if __name__ == '__main__':
         for channel in channels:
             new_msg_count = results.get(channel, (0, 0))[0]
             if processor.needs_analytics_update(channel, new_msg_count):
-                print(f"Updating analytics for {channel}...")
+                print(f"📈 Updating analytics for {channel}...")
                 processor.update_user_analytics(channel)
                 analytics_needed += 1
+                
+                # Emit real-time updates as each channel is processed
+                try:
+                    summary = processor.get_all_channels_summary()
+                    socketio.emit('data_update', {'channels': summary}, broadcast=True)
+                    socketio.emit('processing_status', {
+                        'status': 'processing', 
+                        'message': f'Updated analytics for {channel}',
+                        'progress': f'{analytics_needed}/{len([c for c in channels if processor.needs_analytics_update(c, results.get(c, (0, 0))[0])])}'
+                    }, broadcast=True)
+                except Exception as emit_error:
+                    print(f"Warning: Could not emit update: {emit_error}")
             else:
-                print(f"Analytics for {channel} are up to date, skipping...")
+                print(f"✅ Analytics for {channel} are up to date, skipping...")
         
         if analytics_needed == 0:
-            print("All analytics are up to date! ✅")
+            print("🎉 All analytics are up to date!")
         else:
-            print(f"Updated analytics for {analytics_needed} channels")
+            print(f"✅ Updated analytics for {analytics_needed} channels")
         
-        print("Initial processing complete!")
+        print("🎯 Initial processing complete!")
+        
+        # Final update after all processing is done
+        try:
+            summary = processor.get_all_channels_summary()
+            socketio.emit('data_update', {'channels': summary}, broadcast=True)
+            socketio.emit('processing_status', {
+                'status': 'complete',
+                'message': 'All processing complete!',
+                'progress': '100%'
+            }, broadcast=True)
+        except Exception as emit_error:
+            print(f"Warning: Could not emit final update: {emit_error}")
         
     except Exception as e:
-        print(f"Error during initialization: {e}")
+        print(f"❌ Error during initial processing: {e}")
+        try:
+            socketio.emit('processing_status', {
+                'status': 'error',
+                'message': f'Processing error: {str(e)}'
+            }, broadcast=True)
+        except:
+            pass
+
+def find_available_port(start_port=5001, max_attempts=10):
+    """Find an available port starting from start_port"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+                return port
+        except OSError:
+            continue
+    return None
+
+def cleanup_processes():
+    """Kill any existing Python processes using our port"""
+    try:
+        if os.name == 'nt':  # Windows
+            os.system('taskkill /F /IM python.exe 2>nul')
+            os.system('netstat -ano | findstr :5001 | for /f "tokens=5" %a in (\'more\') do taskkill /PID %a /F 2>nul')
+        else:  # Unix/Linux
+            os.system('pkill -f "python.*app.py"')
+            os.system('lsof -ti:5001 | xargs kill -9 2>/dev/null')
+    except:
+        pass
+
+if __name__ == '__main__':
+    print("🚀 Chat Analytics Dashboard")
+    print("=" * 50)
+    
+    # Handle Ctrl+C gracefully
+    def signal_handler(sig, frame):
+        print("\n🛑 Shutting down gracefully...")
+        scheduler.shutdown()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Check if we have existing data
+    existing_channels = []
+    has_existing_data = False
+    
+    try:
+        existing_channels = processor.db.get_channels()
+        has_existing_data = len(existing_channels) > 0
+        
+        if has_existing_data:
+            print(f"✅ Found existing data for {len(existing_channels)} channels")
+            print("🎯 Starting server immediately - existing data will be available!")
+            print("🔄 New data processing will happen in background...")
+        else:
+            print("📝 No existing data found - will process initial data in background")
+            print("⏳ Dashboard will load data as it's processed...")
+            
+    except Exception as e:
+        print(f"⚠️  Error checking existing data: {e}")
+        print("🔄 Will attempt processing in background...")
     
     # Start the background scheduler
     scheduler.add_job(
@@ -341,11 +422,55 @@ if __name__ == '__main__':
     )
     scheduler.start()
     
+    # Start initial processing in background thread
+    def delayed_processing():
+        """Start processing after server is up"""
+        import time
+        time.sleep(2)  # Give server time to start
+        run_initial_processing()
+    
+    initial_thread = threading.Thread(target=delayed_processing, daemon=True)
+    initial_thread.start()
+    
     # Shut down the scheduler when exiting the app
     atexit.register(lambda: scheduler.shutdown())
     
-    print("Starting Flask-SocketIO server...")
-    print("Dashboard will be available at: http://localhost:5001")
+    # Find an available port
+    port = find_available_port(5001)
+    if port is None:
+        print("❌ Could not find available port. Cleaning up processes...")
+        cleanup_processes()
+        port = find_available_port(5001)
+        if port is None:
+            print("❌ Still cannot find available port. Exiting...")
+            sys.exit(1)
+    
+    print(f"\n🌐 Starting Flask-SocketIO server...")
+    print(f"📍 Dashboard will be available at: http://localhost:{port}")
+    
+    if has_existing_data:
+        print("🎉 Dashboard accessible immediately with existing data!")
+        print("🔄 Background processing will update with any new data...")
+    else:
+        print("⏳ Dashboard will populate as data is processed in background...")
+    
+    print("\n" + "=" * 50)
     
     # Run the Flask-SocketIO server
-    socketio.run(app, debug=False, host='0.0.0.0', port=5001)
+    try:
+        socketio.run(app, debug=False, host='0.0.0.0', port=port)
+    except OSError as e:
+        if "Address already in use" in str(e) or "10048" in str(e):
+            print(f"❌ Port {port} is still in use. Trying to clean up...")
+            cleanup_processes()
+            import time
+            time.sleep(2)
+            port = find_available_port(5001)
+            if port:
+                print(f"🔄 Retrying on port {port}...")
+                socketio.run(app, debug=False, host='0.0.0.0', port=port)
+            else:
+                print("❌ Could not start server. Please manually kill any running instances.")
+                sys.exit(1)
+        else:
+            raise e
