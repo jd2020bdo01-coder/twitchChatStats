@@ -92,23 +92,29 @@ def get_channel_data(channel_name):
                 alt_likelihood = alt_scores.get(username, 0.0) * 100
                 similar_user_list = similar_users.get(username, [])
                 
+                # Get latest message timestamp for each user
+                conn = processor.db.db_manager.get_connection().__enter__()
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''SELECT MAX(timestamp) FROM chat_messages WHERE channel = ? AND username = ?''',
+                    (channel_name, username)
+                )
+                last_msg = cursor.fetchone()[0]
                 user_stats.append({
                     'username': username,
                     'chat_count': chat_count,
                     'alt_likelihood': alt_likelihood,
                     'similar_users': similar_user_list,
-                    'last_updated': datetime.now().isoformat()
+                    'last_updated': last_msg if last_msg else None
                 })
-            
+                conn.close()
             # Sort by chat count
             user_stats.sort(key=lambda x: x['chat_count'], reverse=True)
-            
             # Get date range for filtered data
             if ':' in date_filter:
                 start_date, end_date = date_filter.split(':')
             else:
                 start_date = end_date = date_filter
-            
             return jsonify({
                 'channel': channel_name,
                 'user_stats': user_stats,
@@ -255,22 +261,31 @@ def handle_channel_request(data):
             groups, alt_scores, similar_users = processor.group_users_by_stylometry(user_messages)
             
             user_stats = []
+            # Get latest message timestamp for each user
+            conn = processor.db.db_manager.get_connection().__enter__()
+            cursor = conn.cursor()
             for username in chat_counts:
+                chat_count = chat_counts[username]
+                alt_likelihood = alt_scores.get(username, 0.0) * 100
+                similar_user_list = similar_users.get(username, [])
+                cursor.execute(
+                    '''SELECT MAX(timestamp) FROM chat_messages WHERE channel = ? AND username = ?''',
+                    (channel_name, username)
+                )
+                last_msg = cursor.fetchone()[0]
                 user_stats.append({
                     'username': username,
                     'chat_count': chat_counts[username],
                     'alt_likelihood': alt_scores.get(username, 0.0) * 100,
                     'similar_users': similar_users.get(username, []),
-                    'last_updated': datetime.now().isoformat()
+                    'last_updated': last_msg if last_msg else None
                 })
-            
+            conn.close()
             user_stats.sort(key=lambda x: x['chat_count'], reverse=True)
-            
             if ':' in date_filter:
                 start_date, end_date = date_filter.split(':')
             else:
                 start_date = end_date = date_filter
-            
             channel_data = {
                 'channel': channel_name,
                 'user_stats': user_stats,
