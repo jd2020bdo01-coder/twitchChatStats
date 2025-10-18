@@ -87,27 +87,22 @@ def get_channel_data(channel_name):
             
             # Convert to user stats format
             user_stats = []
+            # Fetch timestamps once using the DB helper to avoid manual connection management
+            user_timestamps = processor.db.get_user_timestamps(channel_name, date_filter)
             for username in chat_counts:
                 chat_count = chat_counts[username]
                 alt_likelihood = alt_scores.get(username, 0.0) * 100
                 similar_user_list = similar_users.get(username, [])
-                
-                # Get latest message timestamp for each user
-                conn = processor.db.db_manager.get_connection().__enter__()
-                cursor = conn.cursor()
-                cursor.execute(
-                    '''SELECT MAX(timestamp) FROM chat_messages WHERE channel = ? AND username = ?''',
-                    (channel_name, username)
-                )
-                last_msg = cursor.fetchone()[0]
+                # timestamps are ordered; take last element if present
+                ts_list = user_timestamps.get(username, [])
+                last_msg = ts_list[-1] if ts_list else None
                 user_stats.append({
                     'username': username,
                     'chat_count': chat_count,
                     'alt_likelihood': alt_likelihood,
                     'similar_users': similar_user_list,
-                    'last_updated': last_msg if last_msg else None
+                    'last_updated': last_msg
                 })
-                conn.close()
             # Sort by chat count
             user_stats.sort(key=lambda x: x['chat_count'], reverse=True)
             # Get date range for filtered data
@@ -261,26 +256,21 @@ def handle_channel_request(data):
             groups, alt_scores, similar_users = processor.group_users_by_stylometry(user_messages)
             
             user_stats = []
-            # Get latest message timestamp for each user
-            conn = processor.db.db_manager.get_connection().__enter__()
-            cursor = conn.cursor()
+            # Use DB helper to get timestamps safely
+            user_timestamps = processor.db.get_user_timestamps(channel_name, date_filter)
             for username in chat_counts:
                 chat_count = chat_counts[username]
                 alt_likelihood = alt_scores.get(username, 0.0) * 100
                 similar_user_list = similar_users.get(username, [])
-                cursor.execute(
-                    '''SELECT MAX(timestamp) FROM chat_messages WHERE channel = ? AND username = ?''',
-                    (channel_name, username)
-                )
-                last_msg = cursor.fetchone()[0]
+                ts_list = user_timestamps.get(username, [])
+                last_msg = ts_list[-1] if ts_list else None
                 user_stats.append({
                     'username': username,
-                    'chat_count': chat_counts[username],
-                    'alt_likelihood': alt_scores.get(username, 0.0) * 100,
-                    'similar_users': similar_users.get(username, []),
-                    'last_updated': last_msg if last_msg else None
+                    'chat_count': chat_count,
+                    'alt_likelihood': alt_likelihood,
+                    'similar_users': similar_user_list,
+                    'last_updated': last_msg
                 })
-            conn.close()
             user_stats.sort(key=lambda x: x['chat_count'], reverse=True)
             if ':' in date_filter:
                 start_date, end_date = date_filter.split(':')

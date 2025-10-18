@@ -226,6 +226,8 @@ socket.on("channel_data", function (data) {
 	}
 	currentChannelData = data;
 	displayChannelData(data);
+	// Update side menu overview so the selected channel card reflects filtered data
+	updateChannelsOverview();
 });
 
 socket.on("error", function (data) {
@@ -309,25 +311,39 @@ function createChannelCard(channel) {
 
 	// Show detailed stats only for selected channel
 	if (selectedChannel === channel.channel) {
+		// If a date filter is active and we have filtered channel data, prefer that for the side-menu
+		const detailsSource =
+			currentChannelData &&
+			currentChannelData.channel === channel.channel &&
+			currentDateFilter
+				? currentChannelData
+				: channel;
+
 		const detailsDiv = document.createElement("div");
 		detailsDiv.className = "channel-details";
 		detailsDiv.innerHTML = `
 						<div class="channel-stats">
 							<div class="stat-item">
-								<span class="stat-value">${channel.total_users.toLocaleString()}</span>
+								<span class="stat-value">${(
+									detailsSource.total_users || 0
+								).toLocaleString()}</span>
 								<span class="stat-label">Total Users</span>
 							</div>
 							<div class="stat-item">
-								<span class="stat-value">${channel.unique_user_count.toLocaleString()}</span>
+								<span class="stat-value">${(
+									detailsSource.unique_user_count || 0
+								).toLocaleString()}</span>
 								<span class="stat-label">Unique Users</span>
 							</div>
 							<div class="stat-item">
-								<span class="stat-value">${channel.total_messages.toLocaleString()}</span>
+								<span class="stat-value">${(
+									detailsSource.total_messages || 0
+								).toLocaleString()}</span>
 								<span class="stat-label">Messages</span>
 							</div>
 							<div class="stat-item">
-								<span class="stat-value">${channel.start_date}</span>
-								<span class="stat-label">to ${channel.end_date}</span>
+								<span class="stat-value">${detailsSource.start_date || "-"}</span>
+								<span class="stat-label">to ${detailsSource.end_date || "-"}</span>
 							</div>
 						</div>
 					`;
@@ -438,26 +454,40 @@ function displayChannelData(data) {
 		"sectionTitle"
 	).textContent = `${data.channel} Analytics`;
 
-	// Update summary cards
+	// Update summary cards. If a date filter is active, prefer the cached unfiltered totals
+	// from allChannelsData so the header shows overall channel totals while the table
+	// displays the filtered user-level data.
 	const summaryContainer = document.getElementById("channelSummary");
+	let summarySource = data;
+	if (currentDateFilter) {
+		const cached = allChannelsData.find((ch) => ch.channel === data.channel);
+		if (cached) summarySource = cached;
+	}
+
 	summaryContainer.innerHTML = `
-                <div class="summary-card">
-                    <div class="stat-value">${data.total_users.toLocaleString()}</div>
-                    <div class="stat-label">Total Users</div>
-                </div>
-                <div class="summary-card">
-                    <div class="stat-value">${data.unique_user_count.toLocaleString()}</div>
-                    <div class="stat-label">Unique Users</div>
-                </div>
-                <div class="summary-card">
-                    <div class="stat-value">${data.total_messages.toLocaleString()}</div>
-                    <div class="stat-label">Messages</div>
-                </div>
-                <div class="summary-card">
-                    <div class="stat-value">${data.start_date}</div>
-                    <div class="stat-label">to ${data.end_date}</div>
-                </div>
-            `;
+				<div class="summary-card">
+					<div class="stat-value">${(
+						summarySource.total_users || 0
+					).toLocaleString()}</div>
+					<div class="stat-label">Total Users</div>
+				</div>
+				<div class="summary-card">
+					<div class="stat-value">${(
+						summarySource.unique_user_count || 0
+					).toLocaleString()}</div>
+					<div class="stat-label">Unique Users</div>
+				</div>
+				<div class="summary-card">
+					<div class="stat-value">${(
+						summarySource.total_messages || 0
+					).toLocaleString()}</div>
+					<div class="stat-label">Messages</div>
+				</div>
+				<div class="summary-card">
+					<div class="stat-value">${summarySource.start_date || "-"}</div>
+					<div class="stat-label">to ${summarySource.end_date || "-"}</div>
+				</div>
+			`;
 
 	// Populate table
 	const tbody = document.getElementById("tableBody");
@@ -578,9 +608,10 @@ function applyFilters() {
 		showNotification(message, "success");
 	}
 
-	// Always fetch and display filtered data for selected channel
+	// Fetch filtered data for the selected channel. The socket 'channel_data' handler
+	// will update the side-menu details once the filtered data is returned.
 	requestChannelData(channel, currentDateFilter);
-	updateSelectedChannelInfo(channel);
+	// Show the side info container; it will be populated when 'channel_data' arrives
 	document.getElementById("selectedChannelInfo").style.display = "block";
 }
 
